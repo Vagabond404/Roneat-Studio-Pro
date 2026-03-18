@@ -10,16 +10,20 @@ RSP/
 build/
 dist/
 *.spec
+*.exe
 
 # IDE
 .idea/
 .vscode/
 
-# Gros fichiers binaires
+# Multimedia & Large Binaries
 ffmpeg.exe
 *.mp4
 *.wav
 *.mp3
 
-# Projets temporaires
+# Project Files
 *.roneat
+*.log
+crash_log.txt
+pylint_report.txt
