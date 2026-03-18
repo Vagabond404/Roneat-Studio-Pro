@@ -1,5 +1,17 @@
-# Roneat Studio Pro ᨠ
+<div align="center">
+  <img src="assets/logo.png" alt="Roneat Studio Pro Logo" width="200" />
+  
+  <h1>Roneat Studio Pro ᨠ</h1>
+  
+  <p>
+    <b>A professional suite designed for transcribing, editing, and exporting scores for the Roneat (the traditional Cambodian xylophone).</b>
+  </p>
+  <p>
+    It combines modern AI audio analysis with a specialized score editor to bridge the gap between traditional performance and digital notation.
+  </p>
+</div>
 
+<<<<<<< HEAD
 ![Version](https://img.shields.io/badge/version-2.0.1-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
 ![License](https://img.shields.io/badge/license-Non--Commercial-red.svg)
@@ -7,6 +19,9 @@
 **Roneat Studio Pro** est une suite logicielle professionnelle conçue pour la transcription, l'édition et l'exportation de partitions pour le **Roneat Ek** (le xylophone traditionnel cambodgien). Ce logiciel combine une analyse audio par intelligence artificielle avec un éditeur de partition 2D spécialisé, créant ainsi un pont entre la performance musicale traditionnelle et la notation numérique moderne.
 
 ![Roneat Studio Pro Logo](assets/logo.png)
+=======
+<br />
+>>>>>>> 0423b09f14febcd19627d33bf61bbf31d0d3cccb
 
 ## 📋 Table des matières
 
@@ -17,7 +32,15 @@
 - [Compilation (Créer l'exécutable)](#-compilation-créer-lexécutable)
 - [Licence et Contact](#-licence-et-contact)
 
+<<<<<<< HEAD
 ---
+=======
+<br />
+
+## 🚀 Getting Started (For Developers & Source Code Users)
+
+If you are running the software from the source code, follow these steps to set up your environment.
+>>>>>>> 0423b09f14febcd19627d33bf61bbf31d0d3cccb
 
 ## ✨ Fonctionnalités Principales
 
@@ -31,6 +54,7 @@
 
 ---
 
+<<<<<<< HEAD
 ## 🚀 Prérequis
 
 Pour exécuter le code source de Roneat Studio Pro sur votre machine, vous aurez besoin de :
@@ -39,6 +63,39 @@ Pour exécuter le code source de Roneat Studio Pro sur votre machine, vous aurez
 - **FFmpeg** : Requis pour le traitement audio et le multiplexage de l'export vidéo MP4.
 
 ---
+=======
+**1. Clone the repository**:
+```bash
+git clone https://github.com/Vagabond404/Roneat-Studio-Pro.git
+cd Roneat-Studio-Pro
+```
+
+**2. Create a Virtual Environment (Highly Recommended)**:
+```bash
+python -m venv .venv
+```
+
+**Activate the virtual environment**:
+
+*On Windows*:
+```bash
+.\.venv\Scripts\activate
+```
+
+*On macOS/Linux*:
+```bash
+source .venv/bin/activate
+```
+
+**3. Install Dependencies**:
+```bash
+pip install -r requirements.txt
+```
+
+**4. Add FFmpeg**:
+- Download `ffmpeg.exe` for your system.
+- Place `ffmpeg.exe` directly in the root folder of the project (next to `main.py`).
+>>>>>>> 0423b09f14febcd19627d33bf61bbf31d0d3cccb
 
 ## 🛠️ Installation (Code Source)
 
@@ -75,10 +132,17 @@ Pour lancer l'application :
 python main.py
 ```
 
+<<<<<<< HEAD
 ---
+=======
+<br />
+
+## 🛠️ Building the Executable
+>>>>>>> 0423b09f14febcd19627d33bf61bbf31d0d3cccb
 
 ## 🔄 Mise à jour GitHub
 
+<<<<<<< HEAD
 Pour envoyer rapidement vos modifications sur GitHub (add, commit et push en une seule fois) :
 
 1. Lancez le script d'automatisation :
@@ -114,3 +178,24 @@ Ce logiciel est protégé par une **Licence Personnalisée Non-Commerciale**. Vo
 
 ---
 *Développé par Vagabond404 — 2026*
+=======
+**1. Install PyInstaller**:
+```bash
+pip install pyinstaller
+```
+
+**2. Run the build script**:
+```bash
+python build.py
+```
+*The executable will be generated in the `dist/` folder.*
+
+<br />
+
+## 📝 License
+
+This project is governed by a Custom Non-Commercial License. You may modify the code, but you may not use this software or any of its derivatives to generate revenue without explicit authorization. See `LICENSE.txt` for full details.
+
+---
+*Developed by Ange Labbe — 2026*
+>>>>>>> 0423b09f14febcd19627d33bf61bbf31d0d3cccb
