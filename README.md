@@ -1,8 +1,17 @@
-# Roneat Studio Pro ᨠ
+<div align="center">
+  <img src="assets/logo.png" alt="Roneat Studio Pro Logo" width="200" />
+  
+  <h1>Roneat Studio Pro ᨠ</h1>
+  
+  <p>
+    <b>A professional suite designed for transcribing, editing, and exporting scores for the Roneat (the traditional Cambodian xylophone).</b>
+  </p>
+  <p>
+    It combines modern AI audio analysis with a specialized score editor to bridge the gap between traditional performance and digital notation.
+  </p>
+</div>
 
-Roneat Studio Pro is a professional suite designed for transcribing, editing, and exporting scores for the **Roneat** (the traditional Cambodian xylophone). It combines modern AI audio analysis with a specialized score editor to bridge the gap between traditional performance and digital notation.
-
-![Roneat Studio Pro Logo](assets/logo.png)
+<br />
 
 ## ✨ Key Features
 
@@ -14,7 +23,11 @@ Roneat Studio Pro is a professional suite designed for transcribing, editing, an
 - **📂 Project Management**: Save and load your work using the `.roneat` project format.
 - **🖱️ Drag & Drop**: Quickly import audio files or open projects by dragging them directly into the app.
 
-## 🚀 Getting Started
+<br />
+
+## 🚀 Getting Started (For Developers & Source Code Users)
+
+If you are running the software from the source code, follow these steps to set up your environment.
 
 ### Prerequisites
 
@@ -23,27 +36,37 @@ Roneat Studio Pro is a professional suite designed for transcribing, editing, an
 
 ### Installation
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/Vagabond404/Roneat-Studio-Pro.git
-   cd Roneat-Studio-Pro
-   ```
+**1. Clone the repository**:
+```bash
+git clone https://github.com/Vagabond404/Roneat-Studio-Pro.git
+cd Roneat-Studio-Pro
+```
 
-2. **Create a Virtual Environment** (Recommended):
-   ```bash
-   python -m venv venv
-   # On Windows
-   .\venv\Scripts\activate
-   ```
+**2. Create a Virtual Environment (Highly Recommended)**:
+```bash
+python -m venv .venv
+```
 
-3. **Install Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+**Activate the virtual environment**:
 
-4. **Add FFmpeg**:
-   - Download `ffmpeg.exe` for Windows.
-   - Place `ffmpeg.exe` directly in the root folder of the project (next to `main.py`).
+*On Windows*:
+```bash
+.\.venv\Scripts\activate
+```
+
+*On macOS/Linux*:
+```bash
+source .venv/bin/activate
+```
+
+**3. Install Dependencies**:
+```bash
+pip install -r requirements.txt
+```
+
+**4. Add FFmpeg**:
+- Download `ffmpeg.exe` for your system.
+- Place `ffmpeg.exe` directly in the root folder of the project (next to `main.py`).
 
 ### Running the App
 
@@ -52,23 +75,28 @@ Simply run the main entry point:
 python main.py
 ```
 
+<br />
+
 ## 🛠️ Building the Executable
 
 To generate a standalone `.exe` for Windows:
 
-1. Install PyInstaller:
-   ```bash
-   pip install pyinstaller
-   ```
-2. Run the build script:
-   ```bash
-   python build.py
-   ```
-The executable will be generated in the `dist/` folder.
+**1. Install PyInstaller**:
+```bash
+pip install pyinstaller
+```
+
+**2. Run the build script**:
+```bash
+python build.py
+```
+*The executable will be generated in the `dist/` folder.*
+
+<br />
 
 ## 📝 License
 
-This project is currently for private use. Contact the author for licensing details.
+This project is governed by a Custom Non-Commercial License. You may modify the code, but you may not use this software or any of its derivatives to generate revenue without explicit authorization. See `LICENSE.txt` for full details.
 
 ---
-*Developed by Vagabond404 — 2026*
+*Developed by Ange Labbe — 2026*
