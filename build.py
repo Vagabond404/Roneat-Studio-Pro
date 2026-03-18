@@ -88,6 +88,8 @@ EXCLUDES = [
     "docutils",
     "setuptools",
     "pkg_resources",
+    "push_git",
+    "build",
 ]
 
 # Output folder (PyInstaller default: dist/)
