@@ -1,17 +1,22 @@
-<div align="center">
-  <img src="assets/logo.png" alt="Roneat Studio Pro Logo" width="200" />
-  
-  <h1>Roneat Studio Pro ᨠ</h1>
-  
-  <p>
-    <b>A professional suite designed for transcribing, editing, and exporting scores for the Roneat (the traditional Cambodian xylophone).</b>
-  </p>
-  <p>
-    It combines modern AI audio analysis with a specialized score editor to bridge the gap between traditional performance and digital notation.
-  </p>
-</div>
+# ![Roneat Studio Pro Logo](assets/logo.png)
 
-<br />
+# Roneat Studio Pro ᨠ
+
+**A professional suite designed for transcribing, editing, and exporting scores for the Roneat (the traditional Cambodian xylophone).**
+
+It combines modern AI audio analysis with a specialized score editor to bridge the gap between traditional performance and digital notation.
+
+📚 **[Read the Official Documentation](https://roneat-studio-pro.gitbook.io/roneat-studio-pro-docs)**
+
+---
+
+## 📚 Documentation
+
+For complete instructions on how to use the software, including interface overview, AI audio transcription, and exporting guides, please refer to our official documentation:
+
+👉 **[Roneat Studio Pro Documentation](https://roneat-studio-pro.gitbook.io/roneat-studio-pro-docs)**
+
+---
 
 ## ✨ Key Features
 
@@ -23,7 +28,7 @@
 - **📂 Project Management**: Save and load your work using the `.roneat` project format.
 - **🖱️ Drag & Drop**: Quickly import audio files or open projects by dragging them directly into the app.
 
-<br />
+---
 
 ## 🚀 Getting Started (For Developers & Source Code Users)
 
@@ -75,7 +80,7 @@ Simply run the main entry point:
 python main.py
 ```
 
-<br />
+---
 
 ## 🛠️ Building the Executable
 
@@ -92,7 +97,7 @@ python build.py
 ```
 *The executable will be generated in the `dist/` folder.*
 
-<br />
+---
 
 ## 📝 License
 
