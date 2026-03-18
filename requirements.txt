@@ -1,0 +1,10 @@
+customtkinter
+librosa
+numpy
+reportlab
+soundfile
+sounddevice
+imageio
+imageio-ffmpeg
+Pillow
+scipy

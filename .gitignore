@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+RSP/
+.venv/
+
+# Build & Dist
+build/
+dist/
+*.spec
+
+# IDE
+.idea/
+.vscode/
+
+# Gros fichiers binaires
+ffmpeg.exe
+*.mp4
+*.wav
+*.mp3
+
+# Projets temporaires
+*.roneat
