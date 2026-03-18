@@ -1,107 +1,46 @@
-# ![Roneat Studio Pro Logo](assets/logo.png)
-
-# Roneat Studio Pro ᨠ
-
-**A professional suite designed for transcribing, editing, and exporting scores for the Roneat (the traditional Cambodian xylophone).**
-
-It combines modern AI audio analysis with a specialized score editor to bridge the gap between traditional performance and digital notation.
-
-📚 **[Read the Official Documentation](https://roneat-studio-pro.gitbook.io/roneat-studio-pro-docs)**
-
+---
+description: Get an overview of Roneat Studio Pro and follow the recommended learning path.
 ---
 
-## 📚 Documentation
+# Welcome to Roneat Studio Pro
 
-For complete instructions on how to use the software, including interface overview, AI audio transcription, and exporting guides, please refer to our official documentation:
+Welcome to the official documentation for **Roneat Studio Pro**.
 
-👉 **[Roneat Studio Pro Documentation](https://roneat-studio-pro.gitbook.io/roneat-studio-pro-docs)**
+Roneat Studio Pro is built for transcribing, editing, and learning the **Roneat Ek**.
 
----
+It combines AI audio analysis with a dedicated 2D score editor made for Khmer musical practice.
 
-## ✨ Key Features
+### What You Can Do
 
-- **🎼 Professional Score Editor**: A specialized 2D editor designed specifically for Roneat notation. Includes real-time 2D visualization and playback.
-- **🎤 Audio AI Transcription**: Convert your Roneat recordings directly into digital notation using advanced AI pitch detection and fingerprinting.
-- **⚖️ Advanced Calibration**: Fine-tune the AI by recording your own instrument's "fingerprints" for near-perfect transcription accuracy.
-- **📹 MP4 Video Export**: Generate high-definition 2D videos of your scores, synced with audio, perfect for social media or teaching.
-- **📄 PDF Export**: Export high-quality sheet music ready for printing.
-- **📂 Project Management**: Save and load your work using the `.roneat` project format.
-- **🖱️ Drag & Drop**: Quickly import audio files or open projects by dragging them directly into the app.
+* Transcribe audio recordings into an editable score.
+* Edit notes in a visual grid tailored to the Roneat Ek.
+* Export clean PDF sheets for printing.
+* Render scrolling MP4 videos for study and sharing.
 
----
+### Why It Exists
 
-## 🚀 Getting Started (For Developers & Source Code Users)
+> _Easy to Play, Impossible to Forget._
 
-If you are running the software from the source code, follow these steps to set up your environment.
+Roneat Studio Pro helps preserve and teach traditional Cambodian music with modern tools.
 
-### Prerequisites
+It is designed for musicians, students, educators, and researchers who need a faster workflow without losing musical context.
 
-- **Python 3.10 or higher**: [Download Python](https://www.python.org/downloads/)
-- **FFmpeg**: Required for MP4 video export (audio/video muxing).
+### Start Here
 
-### Installation
+If you are new to the software, follow this order:
 
-**1. Clone the repository**:
-```bash
-git clone https://github.com/Vagabond404/Roneat-Studio-Pro.git
-cd Roneat-Studio-Pro
-```
+1. [Installation & Setup](getting-started/installation-and-setup.md)
+2. [Interface Overview](user-guide/interface-overview.md)
+3. [AI Audio Transcription](user-guide/ai-audio-transcription.md)
+4. [Exporting (PDF & Video)](user-guide/exporting-pdf-and-video.md)
 
-**2. Create a Virtual Environment (Highly Recommended)**:
-```bash
-python -m venv .venv
-```
+### Reference Pages
 
-**Activate the virtual environment**:
+* [Settings Overview](user-guide/settings-overview.md)
+* [FAQ](legal-and-contact/faq.md)
+* [Support & Contact](legal-and-contact/support-and-contact.md)
+* [License Agreement](legal-and-contact/license-agreement.md)
 
-*On Windows*:
-```bash
-.\.venv\Scripts\activate
-```
+### For Developers
 
-*On macOS/Linux*:
-```bash
-source .venv/bin/activate
-```
-
-**3. Install Dependencies**:
-```bash
-pip install -r requirements.txt
-```
-
-**4. Add FFmpeg**:
-- Download `ffmpeg.exe` for your system.
-- Place `ffmpeg.exe` directly in the root folder of the project (next to `main.py`).
-
-### Running the App
-
-Simply run the main entry point:
-```bash
-python main.py
-```
-
----
-
-## 🛠️ Building the Executable
-
-To generate a standalone `.exe` for Windows:
-
-**1. Install PyInstaller**:
-```bash
-pip install pyinstaller
-```
-
-**2. Run the build script**:
-```bash
-python build.py
-```
-*The executable will be generated in the `dist/` folder.*
-
----
-
-## 📝 License
-
-This project is governed by a Custom Non-Commercial License. You may modify the code, but you may not use this software or any of its derivatives to generate revenue without explicit authorization. See `LICENSE.txt` for full details.
-
----
-*Developed by Ange Labbe — 2026*
+If you want to compile or package the app yourself, see [Building from Source](developer-and-build-guide/building-from-source.md).
