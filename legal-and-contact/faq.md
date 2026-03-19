@@ -6,174 +6,110 @@ description: >-
 
 # FAQ
 
-Start here for the fastest answers.
+Start here for quick answers.
 
 If you still need help, use [Support & Contact](support-and-contact.md).
 
-{% hint style="info" %}
-Best pages:
-
-* [Installation & Setup](../getting-started/installation-and-setup.md)
-* [AI Audio Transcription](../user-guide/ai-audio-transcription.md)
-* [Exporting (PDF & Video)](../user-guide/exporting-pdf-and-video.md)
-* [Settings Overview](../user-guide/settings-overview.md)
-{% endhint %}
-
-### Setup
+### Frequently Asked Questions
 
 <details>
 
 <summary><strong>What operating systems are supported?</strong></summary>
 
-Roneat Studio Pro currently supports **Windows 10** and **Windows 11**.
+Roneat Studio Pro v2 supports **Windows 10** and **Windows 11** (64-bit).
+
+macOS and Linux are not officially supported in the current release, though running from source code may work.
 
 </details>
 
 <details>
 
-<summary><strong>Why does Windows warn me before launch?</strong></summary>
+<summary><strong>Why is the first launch slow?</strong></summary>
 
-**Windows SmartScreen** can appear for newly released apps.
+On first launch, the app initializes audio drivers and pre-loads the analysis library, `librosa`.
 
-If you downloaded the installer from the official release source, click **More info**, then **Run anyway**.
+This is a one-time process.
 
-</details>
-
-<details>
-
-<summary><strong>Why is the first launch slower than usual?</strong></summary>
-
-The first launch can take a few extra seconds.
-
-The app may still be initializing audio drivers and local resources.
-
-</details>
-
-### Transcription
-
-<details>
-
-<summary><strong>What file types can I transcribe?</strong></summary>
-
-You can import **WAV**, **MP3**, and **FLAC** files for AI transcription.
+Subsequent launches are faster.
 
 </details>
 
 <details>
 
-<summary><strong>Does AI transcription produce a perfect score?</strong></summary>
+<summary><strong>My transcription has many wrong notes. What should I do?</strong></summary>
 
-No.
+Complete the calibration step first.
 
-It creates a strong draft, not a final score.
+It is the single biggest factor in transcription accuracy.
 
-You should still review timing, pitch mapping, and ghost notes.
-
-</details>
-
-<details>
-
-<summary><strong>How do I get the best transcription result?</strong></summary>
-
-Use a clean solo recording.
-
-Keep background noise low.
-
-Calibrate first if note mapping looks shifted.
-
-Then review each phrase before export.
-
-</details>
-
-### Projects and Exports
-
-<details>
-
-<summary><strong>Where are project files saved?</strong></summary>
-
-Projects are saved as `.roneat` files.
-
-You can choose the default save location in [Settings Overview](../user-guide/settings-overview.md).
+Also use a clean recording with minimal background noise, little reverb, and one clear instrument.
 
 </details>
 
 <details>
 
-<summary><strong>What export formats are available?</strong></summary>
+<summary><strong>Can I use Roneat Studio Pro for instruments other than the Roneat Ek?</strong></summary>
 
-You can export to:
+The score editor and calibration system can technically be adapted to other 21-note melodic percussion instruments.
 
-* **PDF** for print and archive
-* **MP4** for scrolling playback videos
-
-</details>
-
-<details>
-
-<summary><strong>Why is video export slow?</strong></summary>
-
-Video export is CPU-intensive.
-
-Longer scores take more time to render, especially when exporting MP4.
-
-Keep the app open until rendering is complete.
+However, the interface, notation system, and display are specifically designed for the Roneat Ek.
 
 </details>
 
 <details>
 
-<summary><strong>When should I export as PDF instead of MP4?</strong></summary>
+<summary><strong>What does the '#' symbol mean in notation?</strong></summary>
 
-Use **PDF** for printed notation and reference sheets.
+In Roneat Studio Pro, `#` does **not** mean sharp, as in Western notation.
 
-Use **MP4** for guided playback, lessons, and shareable demos.
+It means **tremolo**.
 
-</details>
+`9#` means tremolo on bar 9.
 
-### Troubleshooting and Support
-
-<details>
-
-<summary><strong>What should I include in a bug report?</strong></summary>
-
-Send these items:
-
-1. App version
-2. Windows version
-3. Short reproduction steps
-4. `app.log`
-5. The related project or source file, if relevant
+`9#3` means 3 rapid strikes on bar 9.
 
 </details>
 
 <details>
 
-<summary><strong>Where is the log file?</strong></summary>
+<summary><strong>Can I sell scores I create with this software?</strong></summary>
 
-On Windows, the log file is stored here:
+The software is licensed for **non-commercial use**.
 
-`%APPDATA%\RoneatStudioPro\app.log`
+You may not use it to generate revenue under the standard license.
+
+For commercial licensing inquiries, contact `contact@angelvisionlabs.com`.
 
 </details>
 
 <details>
 
-<summary><strong>Where do I contact support?</strong></summary>
+<summary><strong>Where are my project files stored?</strong></summary>
 
-Use the contact details on [Support & Contact](support-and-contact.md).
+You choose the save location when creating a `.roneat` project.
+
+App data, such as settings, calibration data, and logs, is stored in `%APPDATA%\RoneatStudioPro\`.
 
 </details>
 
-### License
+<details>
+
+<summary><strong>FFmpeg is missing and MP4 export does not work.</strong></summary>
+
+If you installed the Windows release, FFmpeg is bundled already.
+
+If you are running from source, download `ffmpeg.exe` and place it in the project root next to `main.py`.
+
+</details>
 
 <details>
 
-<summary><strong>Can I use Roneat Studio Pro commercially?</strong></summary>
+<summary><strong>Can I undo changes in the Score Editor?</strong></summary>
 
-Not by default.
+Yes.
 
-The standard license is **non-commercial**.
+The Score Editor keeps a full undo and redo history.
 
-For commercial use, exceptions, or partnerships, review the [License Agreement](license-agreement.md) and contact **Angel Vision Labs**.
+Use `Ctrl+Z` for undo and `Ctrl+Y` for redo.
 
 </details>

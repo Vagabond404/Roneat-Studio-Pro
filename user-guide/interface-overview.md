@@ -1,90 +1,68 @@
 ---
-description: Learn the main areas of the app interface and how the workflow is organized.
+description: Learn the three main panels of Roneat Studio Pro and how they work together.
 ---
 
 # Interface Overview
 
-Roneat Studio Pro is organized around one main workflow: **import, edit, preview, and export**.
+Roneat Studio Pro is organized around a persistent sidebar and three working panels.
 
-The interface is split into four main areas.
+Together, they support one clear workflow: **write or import, review, calibrate, and export**.
 
-<figure><img src="../.gitbook/assets/image (6).png" alt=""><figcaption></figcaption></figure>
+### 1. The Sidebar (Left Panel)
 
-### 1. Top Navigation Bar
+The sidebar is the navigation spine of the app.
 
-The top bar gives you access to project-level actions and settings.
+It contains:
 
-#### Main menu
+* The **Roneat Studio Pro logo and branding** at the top
+* Three navigation buttons: **🎼 Score Editor**, **🎤 Audio AI**, and **⚙ Settings**
+* A prominent gold **Save Project** button for `.roneat` files
+* A **Load Project** button for existing `.roneat` files
+* A status indicator at the bottom, such as **● Ready** or **● Working…**
 
-* **File**: Create, open, save, and export projects.
-* **Edit**: Undo, redo, and other score editing actions.
-* **Settings**: Open appearance, audio, and storage preferences.
+{% hint style="info" %}
+You can also open projects by dragging and dropping a `.roneat` file directly onto the application window.
+{% endhint %}
 
-#### Title and version
+### 2. The Score Editor (Main View)
 
-The center area shows the application name and current version.
+Select **🎼 Score Editor** to open the main writing workspace.
 
-This is useful when comparing behavior across releases or reporting issues.
+This is where you enter notation, preview it, and export finished work.
 
-### 2. Score Canvas
+#### Main components
 
-The canvas is the main editing area.
+* **Title field** — Enter the name of the piece. This becomes the default filename when saving.
+* **Notes text box** — Write or paste notation here. See [Score Notation Reference](score-notation-reference.md) for the full syntax.
+* **Live Preview grid** — Renders the score in real time and shows the 21 bars of the Roneat Ek visually.
+* **BPM control** — Sets playback tempo in beats per minute. This is disabled when synced playback comes from analyzed audio.
+* **Sync label** — Shows **⏱ Synced playback loaded** when the score uses original timing from an imported recording.
+* **Play / Stop controls** — Start or stop synthesized playback of the score.
+* **Left-hand toggle** — Adds the second mallet hand, using bars `+7`, in playback and preview.
+* **Undo / Redo** — Full undo history is maintained while editing.
+* **Validation panel** — Shows invalid tokens and notation issues in real time.
+* **Export buttons** — Open the PDF and MP4 export workflows directly from the editor.
 
-This is where notes, timing, and score structure are displayed.
+### 3. The Audio AI Panel
 
-#### Roneat grid
+Select **🎤 Audio AI** to transcribe recordings into draft scores.
 
-* **Vertical columns** represent the bars of the Roneat Ek.
-* **Horizontal divisions** represent beats and rhythmic subdivisions.
+This panel handles file loading, analysis, transcription review, and polyphonic options.
 
-This layout makes pitch and timing visible at the same time.
+See [AI Audio Transcription](ai-audio-transcription.md) for the full workflow.
 
-#### Playhead
+### 4. The Settings Panel
 
-A vertical playhead moves during playback.
+Select **⚙ Settings** to control appearance, playback, calibration, and storage paths.
 
-It shows the exact position currently being heard or previewed.
+This panel also contains the calibration workflow and advanced frequency presets.
 
-### 3. Left Tool Palette
-
-The left sidebar contains the primary note editing tools.
-
-#### Draw and erase
-
-* **Draw** adds notes where you click.
-* **Erase** removes notes quickly.
-
-#### Select and move
-
-* **Select** highlights one note or a group of notes.
-* **Drag / Move** repositions selected notes in time or pitch.
-
-Use selection when you want to adjust a phrase instead of editing notes one by one.
-
-### 4. Bottom Playback Bar
-
-The bottom bar controls playback and timing.
-
-#### Transport controls
-
-* **Play / Pause / Stop** control score playback.
-* **Rec** is used when recording is enabled in the current workflow.
-* **Reset** returns playback to the start.
-
-#### Timing controls
-
-* **Metronome** toggles the click track.
-* **Start Point** defines where playback begins.
-* **BPM slider** changes playback speed without changing pitch.
+See [Settings Overview](settings-overview.md) for details.
 
 ### Suggested First Workflow
 
-If this is your first time in the app:
-
-1. Open or create a project.
-2. Add or import notes into the canvas.
-3. Use the left tools to clean timing and pitch placement.
-4. Preview playback from the bottom bar.
-5. Export once the score is ready.
-
-Next, see [AI Audio Transcription](ai-audio-transcription.md) or [Exporting (PDF & Video)](exporting-pdf-and-video.md).
+1. Set a title in the Score Editor.
+2. Write notation manually or import from Audio AI.
+3. Review the live preview and validation panel.
+4. Calibrate your instrument if transcription accuracy needs improvement.
+5. Save the project and export PDF or MP4.

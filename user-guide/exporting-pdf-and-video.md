@@ -6,68 +6,63 @@ description: Export scores as PDF or MP4 and choose the right output settings.
 
 Roneat Studio Pro supports two export formats:
 
-* **PDF** for printing and archiving
-* **MP4 video** for playback, teaching, and sharing
+* **PDF** for print-ready notation
+* **MP4** for synchronized scrolling score videos
 
 ### Before You Export
 
 Check these items first:
 
-* Your score timing is correct
-* Titles and credits are filled in
-* The playback speed matches your intended result
+1. Confirm the score text is final.
+2. Review the live preview for errors.
+3. Set the correct title.
+4. Confirm whether playback should use synthesized or synced audio.
 
-### Export as PDF
+### PDF Export
 
-PDF export is designed for clean printed notation.
+The PDF export dialog includes these options:
 
-#### Available options
+* **Title** — Pulled automatically from the Score Editor title field
+* **Composer name** — Optional. Shown on the cover page
+* **Show Cover Page** — Adds a decorative cover page with title, composer, and date
+* **Columns per row** — Number of note cells per row. Default: `16`
+* **Measure mode** — Draw bar lines every 4 beats, every 8 beats, or use **Manual** mode with `/`
+* **Show left-hand notation** — Displays the computed left-hand bar number below each right-hand note in smaller blue text
+* **Show row numbers** — Adds a row index on the left of each grid row
+* **Accent color** — Sets the note number color. Default: gold `#c8a96e`
+* **Font size override** — Lets you set the note number size manually
 
-* Choose **A4** or **Letter**
-* Add a **title**
-* Add a **composer or arranger**
-* Add **performance notes**
+{% hint style="info" %}
+Tremolo tokens such as `9#3` are shown as `9~3` in the PDF grid.
+{% endhint %}
 
-#### Output quality
+### MP4 Video Export
 
-The PDF uses vector graphics.
+MP4 export creates a scrolling score video synchronized to audio.
 
-This keeps lines and symbols sharp at any zoom level and on printed pages.
+Key points:
 
-### Export as Video
+* The video shows the score grid scrolling in time
+* The audio track is either synthesized from the score or taken from the original embedded recording
+* The output file is a standard **H.264 MP4**
+* Rendering uses **FFmpeg**, which is bundled with the Windows installer
+* Typical uses include YouTube uploads, teaching material, and social clips
 
-Video export creates a scrolling visual playback of your score.
-
-This is useful for:
-
-* Guided practice
-* Classroom demonstration
-* Social sharing
-* Visual study
-
-#### Available options
-
-* Adjust the scrolling speed
-* Choose a **Light** or **Dark** background
-* Customize the strike indicator color
-
-#### Audio synchronization
-
-The exported `.mp4` includes the synthesized Roneat audio track.
-
-The sound is synchronized with the scrolling score automatically.
+{% hint style="info" %}
+FFmpeg is required for MP4 export. It is included in the Windows installer. If you are running from source code, place `ffmpeg.exe` in the root project folder.
+{% endhint %}
 
 {% hint style="warning" %}
 Video export can take time.
 
-It is CPU-intensive, especially on longer scores.
+It is CPU-intensive, especially on long scores.
 
-Do not close the application while rendering is in progress.
+Do not close the app while rendering is in progress.
 {% endhint %}
 
-### When to Use Each Format
+### Which Export Should You Use?
 
-* Use **PDF** when you need a printable reference.
-* Use **Video** when you want guided playback or a shareable demo.
+* Use **PDF** for printing, archiving, and score review
+* Use **MP4** for guided playback, lessons, and online sharing
 
-If your source material starts from audio, see [AI Audio Transcription](ai-audio-transcription.md) first.
+If your score started from a recording, review [AI Audio Transcription](ai-audio-transcription.md) and [Working with Projects](working-with-projects.md) first.

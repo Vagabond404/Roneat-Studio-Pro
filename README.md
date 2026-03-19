@@ -1,41 +1,50 @@
 ---
-description: Get an overview of Roneat Studio Pro and follow the recommended learning path.
+description: >-
+  Understand what Roneat Studio Pro does and follow the fastest path to your
+  first finished score.
 ---
 
 # Welcome to Roneat Studio Pro
 
 Welcome to the official documentation for **Roneat Studio Pro**.
 
-Roneat Studio Pro is built for transcribing, editing, and learning the **Roneat Ek**.
+The **Roneat Ek (រនាតឯក)** is a traditional Cambodian xylophone with 21 bamboo or wood bars, central to classical Khmer court music.
 
-It combines AI audio analysis with a dedicated 2D score editor made for Khmer musical practice.
+Roneat Studio Pro is the first dedicated digital tool built around its unique notation system.
 
-### What You Can Do
+### Key Features
 
-* Transcribe audio recordings into an editable score.
-* Edit notes in a visual grid tailored to the Roneat Ek.
-* Export clean PDF sheets for printing.
-* Render scrolling MP4 videos for study and sharing.
+* 🎼 **Professional Score Editor** — A 2D grid editor built specifically for Roneat Ek notation. Supports real-time playback, undo/redo, and validation.
+* 🎤 **AI Audio Transcription** — Drop in a recording and the engine, powered by `librosa` and pYIN pitch detection, detects note onsets and maps them to the 21 bars automatically.
+* ⚖️ **Instrument Calibration** — Record your own instrument's sound fingerprints so the AI matches your Roneat's exact tuning, not just theoretical frequencies.
+* 📄 **PDF Export** — Export print-ready scores with optional cover page, row numbers, left-hand notation, and custom column counts.
+* 📹 **MP4 Video Export** — Generate scrolling score videos synchronized to audio, ready for YouTube or teaching.
+* 💾 **Project Files (`.roneat`)** — Save and reload complete projects, including embedded audio, in a single compressed archive.
 
-### Why It Exists
+### Who Is This For?
 
-> _Easy to Play, Impossible to Forget._
-
-Roneat Studio Pro helps preserve and teach traditional Cambodian music with modern tools.
-
-It is designed for musicians, students, educators, and researchers who need a faster workflow without losing musical context.
+* Musicians and performers who want to digitize traditional Roneat repertoire
+* Teachers creating study materials for students
+* Researchers and ethnomusicologists documenting Khmer music
+* Students learning the Roneat who want playback and visual feedback
 
 ### Start Here
 
-If you are new to the software, follow this order:
+{% hint style="info" %}
+Recommended flow:
+
+**Install → Learn the Interface → Write or Import a Score → Calibrate → Export**
+{% endhint %}
 
 1. [Installation & Setup](getting-started/installation-and-setup.md)
 2. [Interface Overview](user-guide/interface-overview.md)
-3. [AI Audio Transcription](user-guide/ai-audio-transcription.md)
-4. [Exporting (PDF & Video)](user-guide/exporting-pdf-and-video.md)
+3. Write manually with [Score Notation Reference](user-guide/score-notation-reference.md) or import from [AI Audio Transcription](user-guide/ai-audio-transcription.md)
+4. Improve accuracy with [Calibration Guide](user-guide/calibration-guide.md)
+5. Publish the result with [Exporting (PDF & Video)](user-guide/exporting-pdf-and-video.md)
 
 ### Reference Pages
 
+* [Working with Projects](user-guide/working-with-projects.md)
 * [Settings Overview](user-guide/settings-overview.md)
 * [FAQ](legal-and-contact/faq.md)
 * [Support & Contact](legal-and-contact/support-and-contact.md)
@@ -43,4 +52,4 @@ If you are new to the software, follow this order:
 
 ### For Developers
 
-If you want to compile or package the app yourself, see [Building from Source](developer-and-build-guide/building-from-source.md).
+If you want to run or package the app yourself, see [Building from Source](developer-and-build-guide/building-from-source.md).

@@ -1,71 +1,98 @@
 ---
-description: Adjust appearance, audio calibration, playback, and storage preferences.
+description: >-
+  Adjust appearance, playback, calibration, frequency presets, and file
+  locations.
 ---
 
 # Settings Overview
 
-Use Settings to control appearance, audio behavior, and storage defaults.
+Use **⚙ Settings** to control how Roneat Studio Pro looks, sounds, and stores its data.
 
-Open it from the top navigation bar.
+This is also where calibration is managed.
 
-### Appearance
+### 1. Appearance
 
-Adjust the interface to match your screen and working conditions.
+#### Theme
 
-#### Appearance mode
+Choose one of three appearance modes:
 
-* **System** matches your Windows theme
-* **Light** is better in bright environments
-* **Dark** reduces glare during long sessions
+* **Dark**
+* **Light**
+* **System** — follows the current Windows theme setting
 
-#### UI scaling
+The default is **System**.
 
-Scale the interface from **80%** to **120%**.
+### 2. Audio & Playback
 
-This helps on high-resolution displays and smaller screens.
+#### Playback Mode
 
-### Audio and Analysis Calibration
+Choose how notes are played back:
 
-These settings affect playback and transcription accuracy.
+* **ADSR Synthesis** — The default. The app generates tones mathematically with a realistic xylophone timbre model.
+* **Sample Playback** — Available after calibration. The app plays recorded WAV samples from your actual instrument.
 
-#### Instrument calibration
+Sample Playback gives the most realistic result.
 
-* **Base Frequency (Hz)** adjusts the pitch reference used for note mapping
-* **Sensitivity Threshold** controls how easily strikes are detected
+#### BPM
 
-Use a higher sensitivity threshold if quiet notes are being missed.
+This sets the default tempo for new projects.
 
-Use a lower threshold if background noise is creating false notes.
+#### Hits per second (tremolo)
 
-#### Audio output
+This controls tremolo playback speed.
 
-* **Output Device** selects your speakers or headphones
-* **Buffer Size** helps reduce lag or audio crackling
+The default value is **16 hits/sec**.
 
-If playback is unstable, increase the buffer size first.
+### 3. Calibration
 
-### Storage
+Calibration teaches the AI how your specific instrument sounds.
 
-Choose where projects and exports are saved.
+It is the most important step for accurate transcription.
 
-* **Default Project Folder** sets the save location for `.roneat` files
-* **Export Directory** sets the default folder for PDF and MP4 outputs
-* **Auto-Save** creates temporary backups every 5 minutes when enabled
+#### How to calibrate
 
-{% hint style="success" %}
-Set your project folder and export folder before starting large transcription sessions.
+1. Click **Start Calibration** in the Settings panel.
+2. Choose **Single mallet** or **Two mallets** mode.
+3. Play each bar of the Roneat Ek in order, from bar 1 to bar 21.
+4. Leave a clear gap between each note.
+5. Let the engine detect 21 onsets and extract the data.
 
-It keeps output files easier to manage later.
+For each bar, the app stores:
+
+* A spectral fingerprint for transcription matching
+* A 1.5-second WAV sample for realistic playback
+
+Saved locations:
+
+* Fingerprints: `%APPDATA%\RoneatStudioPro\roneat_fingerprints.json`
+* Samples: `%APPDATA%\RoneatStudioPro\samples\bar_XX.wav`
+
+{% hint style="warning" %}
+Make sure you record all 21 bars clearly and in order.
+
+If the engine detects more or fewer than 21 onsets, calibration will fail or become inaccurate.
 {% endhint %}
 
-### Calibration Tip
+{% hint style="info" %}
+For the best overall result, calibrate both **Single mallet** and **Two mallets** recordings.
+{% endhint %}
 
-When working with a new instrument, test calibration before analyzing a full performance.
+### 4. Hz Frequency Presets
 
-Record a single strike on the first and last bar, then adjust settings until both are detected correctly.
+Advanced users can adjust the expected frequency for each bar manually.
 
-<figure><img src="../.gitbook/assets/image (12).png" alt=""><figcaption></figcaption></figure>
+This is useful when your Roneat follows a non-standard tuning map.
 
-<figure><img src="../.gitbook/assets/image (13).png" alt=""><figcaption></figcaption></figure>
+You can save and load these presets as JSON files.
 
-For transcription workflow, continue with [AI Audio Transcription](ai-audio-transcription.md).
+### 5. File Locations
+
+Roneat Studio Pro stores app data in these locations:
+
+* **App data:** `%APPDATA%\RoneatStudioPro\`
+* **Fingerprints:** `%APPDATA%\RoneatStudioPro\roneat_fingerprints.json`
+* **Samples:** `%APPDATA%\RoneatStudioPro\samples\`
+* **Settings:** `%APPDATA%\RoneatStudioPro\app_settings.json`
+* **Log file:** `%APPDATA%\RoneatStudioPro\app.log`
+
+Next, see [Calibration Guide](calibration-guide.md) or [AI Audio Transcription](ai-audio-transcription.md).

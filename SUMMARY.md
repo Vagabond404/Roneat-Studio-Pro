@@ -8,8 +8,11 @@
 ## User Guide
 
 * [Interface Overview](user-guide/interface-overview.md)
-* [Exporting (PDF & Video)](user-guide/exporting-pdf-and-video.md)
+* [Score Notation Reference](user-guide/score-notation-reference.md)
+* [Working with Projects](user-guide/working-with-projects.md)
 * [AI Audio Transcription](user-guide/ai-audio-transcription.md)
+* [Calibration Guide](user-guide/calibration-guide.md)
+* [Exporting (PDF & Video)](user-guide/exporting-pdf-and-video.md)
 * [Settings Overview](user-guide/settings-overview.md)
 
 ## Developer & Build Guide
