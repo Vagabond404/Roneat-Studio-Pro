@@ -50,7 +50,7 @@ Behind the scenes, the app follows these steps:
 
 Click **🎤 Audio AI** in the sidebar.
 
-![](<../.gitbook/assets/image (8).png>)
+![](<../../.gitbook/assets/image (8).png>)
 {% endstep %}
 
 {% step %}
@@ -60,7 +60,7 @@ Select the recording you want to analyze.
 
 WAV usually gives the most reliable result.
 
-![](<../.gitbook/assets/image (9).png>)
+![](<../../.gitbook/assets/image (9).png>)
 {% endstep %}
 
 {% step %}
@@ -78,7 +78,7 @@ Click **Analyze** and wait for processing to finish.
 
 A progress bar appears while the file is being analyzed.
 
-![](<../.gitbook/assets/image (10).png>)
+![](<../../.gitbook/assets/image (10).png>)
 {% endstep %}
 
 {% step %}
@@ -90,7 +90,7 @@ Check for wrong bars, missed strikes, ghost notes, and timing issues.
 
 Then refine the notation in the Score Editor.
 
-![](<../.gitbook/assets/image (11).png>)
+![](<../../.gitbook/assets/image (11).png>)
 {% endstep %}
 {% endstepper %}
 
@@ -122,4 +122,4 @@ This improves accuracy for pieces where the left and right hand play at the same
 * WAV gives the most reliable results
 * Typical analysis time is **5–30 seconds** for a normal piece
 
-Next, see [Calibration Guide](calibration-guide.md) and [Score Notation Reference](score-notation-reference.md).
+Next, see [Calibration Guide](calibration-guide.md) and [Score Notation Reference](../../reference/score-notation-reference.md).

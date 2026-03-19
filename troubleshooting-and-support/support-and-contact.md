@@ -8,7 +8,7 @@ Use this page for technical help, bug reports, licensing questions, and partners
 
 ### Before You Contact Support
 
-Start with the [FAQ](faq.md).
+Start with the [FAQ](../reference/faq.md).
 
 If the app crashes or behaves unexpectedly, check the log file first:
 

@@ -109,4 +109,4 @@ Fingerprints are stored here:
 
 `%APPDATA%\RoneatStudioPro\roneat_fingerprints.json`
 
-See [Settings Overview](settings-overview.md) for storage details.
+See [Settings Overview](../../reference/settings-overview.md) for storage details.

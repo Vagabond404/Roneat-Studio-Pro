@@ -156,4 +156,4 @@ Common issues:
 Use numbers `1` through `21` for notes.
 {% endhint %}
 
-Next, see [Working with Projects](working-with-projects.md) to learn how scores and embedded audio are saved together.
+Next, see [Working with Projects](../guides/working-with-projects.md) to learn how scores and embedded audio are saved together.

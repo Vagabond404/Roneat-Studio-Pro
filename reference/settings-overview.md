@@ -95,4 +95,4 @@ Roneat Studio Pro stores app data in these locations:
 * **Settings:** `%APPDATA%\RoneatStudioPro\app_settings.json`
 * **Log file:** `%APPDATA%\RoneatStudioPro\app.log`
 
-Next, see [Calibration Guide](calibration-guide.md) or [AI Audio Transcription](ai-audio-transcription.md).
+Next, see [Calibration Guide](../guides/ai-audio-transcription/calibration-guide.md) or [AI Audio Transcription](../guides/ai-audio-transcription/).

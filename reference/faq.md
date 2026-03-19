@@ -8,7 +8,7 @@ description: >-
 
 Start here for quick answers.
 
-If you still need help, use [Support & Contact](support-and-contact.md).
+If you still need help, use [Support & Contact](../troubleshooting-and-support/support-and-contact.md).
 
 ### Frequently Asked Questions
 

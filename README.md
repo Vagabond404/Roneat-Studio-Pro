@@ -1,109 +1,66 @@
 ---
-description: >-
-  Understand what Roneat Studio Pro does and follow the fastest path to your
-  first finished score.
+description: The professional score editor and AI transcription tool for the Roneat Ek.
 ---
 
 # Welcome to Roneat Studio Pro
 
-Welcome to the official documentation for **Roneat Studio Pro**.
+### What Is the Roneat Ek?
 
-The **Roneat Ek (រនាតឯក)** is a traditional Cambodian xylophone with 21 bamboo or hardwood bars, tuned to a pentatonic scale. It is one of the central instruments of classical Khmer court music and pin peat ensembles. Roneat Studio Pro is the first dedicated digital tool built around its unique notation system and sonic characteristics.
+The Roneat Ek (រនាតឯក) is a traditional Cambodian xylophone with 21 bamboo or hardwood bars, tuned to a pentatonic scale. It is one of the central instruments of classical Khmer court music and pin peat ensembles.
 
-_Easy to Play, Impossible to Forget._
+Roneat Studio Pro is the first dedicated digital tool built around its unique notation system and sonic characteristics.
 
-{% hint style="info" %}
-New here? Follow the **Start Here** path below.
-{% endhint %}
+> _Easy to Play, Impossible to Forget._
 
-### Key Features
+### What the Software Does
 
-#### 🎼 Professional Score Editor
+🎼 **Professional Score Editor**\
+Write scores using a simple numbered notation system (bars 1–21). The live preview grid renders your notation in real time. Full playback, undo/redo, and real-time validation included.
 
-Write scores using a simple numbered notation system with bars `1`–`21`.
+🎤 **AI Audio Transcription**\
+Drop in a WAV, MP3, or FLAC recording of a Roneat performance. The engine detects every note onset, identifies the pitch, and generates a draft score automatically.
 
-The live preview grid renders your notation in real time.
+⚖️ **Instrument Calibration**\
+Record your own instrument's 21 bars once. The AI learns its exact sound and uses spectral fingerprints instead of generic pitch detection — dramatically improving transcription accuracy.
 
-Includes playback, undo/redo, and real-time validation.
+📄 **PDF Export**\
+Export print-ready scores with optional cover page, left-hand notation, row numbers, custom columns, and accent color.
 
-#### 🎤 AI Audio Transcription
+📹 **MP4 Video Export**\
+Generate scrolling score videos synchronized to audio. Ready for YouTube, teaching, and social media.
 
-Drop in a `WAV`, `MP3`, or `FLAC` recording of a Roneat performance.
-
-The engine detects every note onset, identifies the pitch, and generates a draft score automatically.
-
-#### ⚖️ Instrument Calibration
-
-Record your own instrument's 21 bars and the AI learns its exact sound.
-
-This replaces generic pitch detection with fingerprint matching tailored to your specific Roneat.
-
-That dramatically improves accuracy.
-
-#### 📄 PDF Export
-
-Export print-ready scores with optional cover page, left-hand notation, row numbers, custom column counts, and your choice of accent color.
-
-#### 📹 MP4 Video Export
-
-Generate scrolling score videos synchronized to audio.
-
-This is ideal for YouTube, teaching, and social media.
-
-#### 💾 Self-Contained Project Files
-
-The `.roneat` format bundles the score, sync data, and source audio into a single compressed file.
-
-Share one file and nothing gets lost.
+💾 **Self-Contained Project Files**\
+The `.roneat` format bundles the score, timing data, and source audio into one compressed file. Share one file and keep everything together.
 
 ### Who Is This For?
 
 * **Musicians and performers** who want to digitize and archive Roneat repertoire
-* **Teachers** creating study materials, video lessons, or printed scores for students
+* **Teachers** creating study materials, printed scores, or video lessons
 * **Students** who want visual playback feedback while learning pieces
 * **Researchers and ethnomusicologists** documenting Khmer musical heritage
-* **Developers** interested in extending or building on the open-source codebase
-
-### Start Here
-
-{% hint style="success" %}
-Recommended flow: **Install → Learn the interface → Write or transcribe → Calibrate → Export**
-{% endhint %}
-
-1. [Installation & Setup](getting-started/installation-and-setup.md)
-2. [Interface Overview](user-guide/interface-overview.md)
-3. [Score Notation Reference](user-guide/score-notation-reference.md)
-4. Use [AI Audio Transcription](user-guide/ai-audio-transcription.md) if you have a recording, or write a score manually
-5. [Calibration Guide](user-guide/calibration-guide.md) for the best transcription accuracy
-6. [Exporting (PDF & Video)](user-guide/exporting-pdf-and-video.md)
+* **Developers** interested in contributing to or extending the open-source codebase
 
 ### Quick Concept: How the Notation Works
 
-In Roneat Studio Pro, you write scores as a sequence of numbers from `1` to `21` — one number per bar strike. Bar `1` is the highest pitch. Bar `21` is the lowest. Rests are written as `-`. Tremolo rolls use `#`. Bar lines use `/`.
+Scores in Roneat Studio Pro are written as a sequence of numbers from 1 to 21 — one number per bar strike. Bar 1 is the highest pitch, bar 21 is the lowest. Rests are written as `-`. Tremolo rolls use `#`. Bar lines use `/`.
 
-| Token    | Meaning           | Example             |
-| -------- | ----------------- | ------------------- |
-| `1`–`21` | A bar strike      | `9`                 |
-| `-`      | A rest            | `1 - - -`           |
-| `#`      | A tremolo roll    | `9#3`               |
-| `/`      | A visual bar line | `9 8 7 6 / 5 4 3 2` |
+Example:
 
-Example: `9 8 7 6 / 5 4 3 2 / 1 - - -`
+`9 8 7 6 / 5 4 3 2 / 1 - - -`
 
-{% hint style="info" %}
-That is enough to start writing.
+That is all you need to start. The full notation system is documented in [Score Notation Reference](reference/score-notation-reference.md).
 
-Use [Score Notation Reference](user-guide/score-notation-reference.md) when you need the full syntax.
-{% endhint %}
+### Start Here
 
-### Reference Pages
+Follow this path if you are new:
 
-* [Working with Projects](user-guide/working-with-projects.md)
-* [Settings Overview](user-guide/settings-overview.md)
-* [FAQ](legal-and-contact/faq.md)
-* [Support & Contact](legal-and-contact/support-and-contact.md)
-* [License Agreement](legal-and-contact/license-agreement.md)
+1. [**Install on Windows**](getting-started/install-on-windows.md) — Download and run the installer
+2. [**Quickstart: Your First Score**](getting-started/quickstart-your-first-score.md) — Complete the 10-minute hands-on walkthrough
+3. [**Score Notation Reference**](reference/score-notation-reference.md) — Learn the full notation system
+4. [**Calibration Guide**](guides/ai-audio-transcription/calibration-guide.md) — Calibrate your instrument for accurate AI transcription
+5. [**AI Audio Transcription**](guides/ai-audio-transcription/) — Transcribe a real recording
+6. [**Exporting (PDF & Video)**](guides/exporting-pdf-and-video.md) — Export your finished score
 
 ### For Developers
 
-If you want to run or package the app yourself, see [Building from Source](developer-and-build-guide/building-from-source.md).
+If you want to build the app from source or package a release, see [Building from Source](developer-guide/building-from-source.md).

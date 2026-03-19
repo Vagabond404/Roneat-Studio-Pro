@@ -65,4 +65,4 @@ Do not close the app while rendering is in progress.
 * Use **PDF** for printing, archiving, and score review
 * Use **MP4** for guided playback, lessons, and online sharing
 
-If your score started from a recording, review [AI Audio Transcription](ai-audio-transcription.md) and [Working with Projects](working-with-projects.md) first.
+If your score started from a recording, review [AI Audio Transcription](ai-audio-transcription/) and [Working with Projects](working-with-projects.md) first.

@@ -2,7 +2,7 @@
 description: Install Roneat Studio Pro on Windows and complete the first-time setup.
 ---
 
-# Installation & Setup
+# Install on Windows
 
 This guide covers installation on **Windows 10** and **Windows 11**.
 
@@ -100,4 +100,4 @@ This usually happens while the app initializes audio drivers and local resources
 
 ### Next Step
 
-Once installation is complete, continue with [Interface Overview](../user-guide/interface-overview.md).
+Once installation is complete, continue with [Quickstart: Your First Score](quickstart-your-first-score.md).

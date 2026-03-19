@@ -71,4 +71,4 @@ If you save them again, use the current format so audio and sync data stay bundl
 3. Save a `.roneat` file before major edits.
 4. Export PDF or MP4 only after your project is finalized.
 
-Next, continue with [AI Audio Transcription](ai-audio-transcription.md) or [Exporting (PDF & Video)](exporting-pdf-and-video.md).
+Next, continue with [AI Audio Transcription](ai-audio-transcription/) or [Exporting (PDF & Video)](exporting-pdf-and-video.md).

@@ -123,7 +123,7 @@ Examples include out-of-range bar numbers, bad tremolo counts, and unrecognized 
 
 PDF and MP4 export are accessible directly from the Score Editor panel.
 
-See [Exporting (PDF & Video)](exporting-pdf-and-video.md) for full details.
+See [Exporting (PDF & Video)](../guides/exporting-pdf-and-video.md) for full details.
 
 {% hint style="warning" %}
 If imported audio timing is attached, the `BPM` field is locked on purpose.
@@ -137,7 +137,7 @@ Access this panel by clicking **🎤 Audio AI** in the sidebar.
 
 Use it to transcribe a recorded audio file into a draft score.
 
-See [AI Audio Transcription](ai-audio-transcription.md) for the full step-by-step workflow.
+See [AI Audio Transcription](../guides/ai-audio-transcription/) for the full step-by-step workflow.
 
 Key elements of this panel:
 
