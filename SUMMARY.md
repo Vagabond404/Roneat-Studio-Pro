@@ -14,6 +14,7 @@
 * [Calibration Guide](user-guide/calibration-guide.md)
 * [Exporting (PDF & Video)](user-guide/exporting-pdf-and-video.md)
 * [Settings Overview](user-guide/settings-overview.md)
+* [Tips & Best Practices](user-guide/tips-and-best-practices.md)
 
 ## Developer & Build Guide
 
@@ -21,6 +22,7 @@
 
 ## Legal & Contact
 
+* [Troubleshooting](legal-and-contact/troubleshooting.md)
 * [Support & Contact](legal-and-contact/support-and-contact.md)
 * [License Agreement](legal-and-contact/license-agreement.md)
 * [FAQ](legal-and-contact/faq.md)
