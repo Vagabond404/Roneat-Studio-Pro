@@ -20,6 +20,9 @@ from ui.views.settings_page  import SettingsPage
 from core.file_manager       import (
     save_roneat_project, load_roneat_project, load_app_settings
 )
+from core.plugin_manager     import PluginManager
+from ui.views.plugin_manager_tab   import PluginManagerTab
+from core.i18n               import tr
 
 
 def resource_path(relative_path):
@@ -41,15 +44,18 @@ class MainWindow(ctk.CTk):
         ctk.set_appearance_mode(load_app_settings().get("theme", "Dark"))
 
         self.C = {
-            "accent":     "#c8a96e",
+            "accent":     "#D4AF37",
             "accent2":    "#e85d4a",
             "success":    "#3ab87a",
-            "text":       ("gray10", "gray92"),
-            "text_dim":   ("gray45", "gray60"),
-            "sidebar_bg": ("gray92", "#0f1117"),
-            "border":     ("gray80", "#1e2330"),
-            "hover":      ("gray85", "#1a1f2e"),
+            "text":       ("gray10", "gray95"),
+            "text_dim":   ("gray45", "#8b949e"),
+            "sidebar_bg": ("gray92", "#090a0f"),
+            "border":     ("gray80", "#1c2128"),
+            "hover":      ("gray85", "#161b22"),
+            "main_bg":    ("gray96", "#12151c"),
+            "card":       ("white",  "#161b22"),
         }
+        self.configure(fg_color=self.C["sidebar_bg"])
 
         icon_path = resource_path(os.path.join("assets", "logo.ico"))
         if os.path.exists(icon_path):
@@ -62,98 +68,110 @@ class MainWindow(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
 
         # ── Sidebar ───────────────────────────────────────────────────────────
-        self.sidebar = ctk.CTkFrame(self, width=230, corner_radius=0,
-                                    fg_color=self.C["sidebar_bg"])
+        self.sidebar = ctk.CTkFrame(self, width=240, corner_radius=0,
+                                    fg_color="transparent")
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_propagate(False)
         self.sidebar.grid_rowconfigure(6, weight=1)
 
         logo = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        logo.grid(row=0, column=0, pady=(32, 6), padx=20, sticky="ew")
+        logo.grid(row=0, column=0, pady=(40, 10), padx=20, sticky="ew")
         ctk.CTkLabel(logo, text="ᨠ",
-                     font=ctk.CTkFont(size=44),
+                     font=ctk.CTkFont(size=46),
                      text_color=self.C["accent"]).pack(anchor="center")
         ctk.CTkLabel(logo, text="Roneat Studio",
-                     font=ctk.CTkFont(family="Georgia", size=17, weight="bold"),
-                     text_color=self.C["accent"]).pack(anchor="center", pady=(4, 0))
+                     font=ctk.CTkFont(family="Segoe UI", size=18, weight="bold"),
+                     text_color=self.C["accent"]).pack(anchor="center", pady=(6, 0))
         ctk.CTkLabel(logo, text="PRO",
-                     font=ctk.CTkFont(family="Courier", size=9, weight="bold"),
+                     font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold", slant="italic"),
                      text_color=self.C["text_dim"]).pack(anchor="center")
 
         ctk.CTkFrame(self.sidebar, height=1, fg_color=self.C["border"]
-                     ).grid(row=1, column=0, padx=18, pady=(8, 16), sticky="ew")
+                     ).grid(row=1, column=0, padx=22, pady=(12, 20), sticky="ew")
 
-        nav_items = [
+        self.base_nav_items = [
             ("editor",   "Score Editor", "🎼"),
             ("audio",    "Audio AI",     "🎤"),
             ("settings", "Settings",     "⚙"),
+            ("plugins",  "Plugins",      "🧩"),
         ]
         self._nav_btns = {}
-        for idx, (key, label, icon) in enumerate(nav_items):
-            btn = ctk.CTkButton(
-                self.sidebar,
-                text=f"  {icon}   {label}",
-                command=lambda k=key: self.show_frame(k),
-                fg_color="transparent",
-                text_color=self.C["text"],
-                hover_color=self.C["hover"],
-                anchor="w", height=44, corner_radius=10,
-                font=ctk.CTkFont(size=13)
-            )
-            btn.grid(row=2 + idx, column=0, pady=2, padx=10, sticky="ew")
-            self._nav_btns[key] = btn
+        
+        self.nav_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        self.nav_frame.grid(row=2, column=0, sticky="nsew", padx=14, pady=4)
+        # Using grid inside nav_frame or pack, pack is easier for dynamic inserts
+        
+        # Build base nav
+        self._build_nav_buttons()
 
         ctk.CTkFrame(self.sidebar, height=1, fg_color=self.C["border"]
-                     ).grid(row=5, column=0, padx=18, pady=(8, 12), sticky="ew")
+                     ).grid(row=3, column=0, padx=22, pady=(12, 16), sticky="ew")
 
         bottom = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        bottom.grid(row=7, column=0, sticky="ew", padx=14, pady=4)
+        bottom.grid(row=4, column=0, sticky="ew", padx=16, pady=4)
 
-        ctk.CTkButton(
-            bottom, text="💾  Save Project",
+        self.save_btn = ctk.CTkButton(
+            bottom, text=f"💾  {tr('Save Project')}",
             command=self.save_proj,
-            fg_color=self.C["accent"], text_color="#0f1117",
-            hover_color="#deba7e", height=40, corner_radius=10,
-            font=ctk.CTkFont(family="Georgia", size=12, weight="bold")
-        ).pack(fill="x", pady=(0, 6))
+            fg_color=self.C["accent"], text_color="#090a0f",
+            hover_color="#e6c45c", height=44, corner_radius=12,
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold")
+        )
+        self.save_btn.pack(fill="x", pady=(0, 8))
 
-        ctk.CTkButton(
-            bottom, text="📂  Load Project",
+        self.load_btn = ctk.CTkButton(
+            bottom, text=f"📂  {tr('Load Project')}",
             command=self.load_proj_dialog,
             fg_color="transparent", text_color=self.C["text"],
             border_width=1, border_color=self.C["border"],
-            hover_color=self.C["hover"], height=38, corner_radius=10,
-            font=ctk.CTkFont(size=12)
-        ).pack(fill="x")
-
+            hover_color=self.C["hover"], height=42, corner_radius=12,
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold")
+        )
+        self.load_btn.pack(fill="x")
+        
+        # Give remaining vertical space to row 5 so status stays pinned at the bottom
+        self.sidebar.grid_rowconfigure(5, weight=1)
+        
         status_f = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        status_f.grid(row=9, column=0, sticky="ew", padx=14, pady=(0, 16))
+        status_f.grid(row=6, column=0, sticky="ew", padx=16, pady=(0, 20))
         self.status_lbl = ctk.CTkLabel(
-            status_f, text="● Ready",
-            font=ctk.CTkFont(size=11),
+            status_f, text=f"● {tr('Ready')}",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color=self.C["success"]
         )
-        self.status_lbl.pack(anchor="w", padx=6)
+        self.status_lbl.pack(anchor="w", padx=8)
 
         # ── Main content ──────────────────────────────────────────────────────
-        self.main_cont = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
-        self.main_cont.grid(row=0, column=1, sticky="nsew")
+        self.main_cont = ctk.CTkFrame(self, corner_radius=16, fg_color=self.C["main_bg"],
+                                      border_width=1, border_color=self.C["border"])
+        self.main_cont.grid(row=0, column=1, sticky="nsew", padx=(0, 16), pady=16)
         self.main_cont.grid_rowconfigure(0, weight=1)
         self.main_cont.grid_columnconfigure(0, weight=1)
+
+        # ── Initialize Plugin System ──────────────────────────────────────────
+        self.plugin_manager_instance = PluginManager()
 
         self.frames = {
             "editor":   ScoreEditor(self.main_cont, self.get_project_data),
             "audio":    AudioToScore(self.main_cont, self.import_from_audio),
             "settings": SettingsPage(self.main_cont),
+            "plugins":  PluginManagerTab(self.main_cont, self.plugin_manager_instance),
         }
 
         self.show_frame("editor")
+
+        self.plugin_manager_instance.initialize(self)
 
         # ── Drag & drop .roneat files ─────────────────────────────────────────
         self._setup_drag_drop()
 
         if initial_file:
             self.load_proj(initial_file)
+            
+        # Hook on_app_start fired ONLY AFTER all UI is fully built
+        self._app_is_ready = True
+        self.plugin_manager_instance.trigger_hook("on_app_start")
+        self._refresh_plugin_ui()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Drag & drop
@@ -190,6 +208,38 @@ class MainWindow(ctk.CTk):
 
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _build_nav_buttons(self, plugin_tabs=None):
+        """Rebuilds the navigation frame buttons."""
+        for widget in self.nav_frame.winfo_children():
+            widget.destroy()
+            
+        self._nav_btns.clear()
+        
+        # Base Items
+        all_items = list(self.base_nav_items)
+        
+        # Plugin Tab Items
+        if plugin_tabs:
+            all_items.extend(plugin_tabs)
+            
+        for key, label, icon in all_items:
+            btn = ctk.CTkButton(
+                self.nav_frame,
+                text=f"  {icon}   {tr(label)}",
+                command=lambda k=key: self.show_frame(k),
+                fg_color="transparent",
+                text_color=self.C["text"],
+                hover_color=self.C["hover"],
+                anchor="w", height=48, corner_radius=12,
+                font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold")
+            )
+            btn.pack(fill="x", pady=4)
+            self._nav_btns[key] = btn
+
+        # Restore active state visually
+        active_tab = getattr(self, "_current_active_tab", "editor")
+        self._set_nav_active(active_tab)
+
     def _set_nav_active(self, key):
         for k, btn in self._nav_btns.items():
             if k == key:
@@ -197,12 +247,69 @@ class MainWindow(ctk.CTk):
             else:
                 btn.configure(fg_color="transparent", text_color=self.C["text"])
 
+    def _refresh_plugin_ui(self):
+        """Clears and redraws the plugin tools based on registered hooks."""
+        tabs = []
+        if hasattr(self, 'plugin_manager_instance'):
+            tabs = self.plugin_manager_instance.custom_tabs
+            
+        # 1. Update Navigation Tabs ──────────
+        nav_tabs = [(t["tab_id"], t["label"], t["icon"]) for t in tabs]
+        self._build_nav_buttons(nav_tabs)
+        
+        # Unpack previously injected tab frames if removed
+        active_plugin_tab_ids = [t["tab_id"] for t in tabs]
+        keys_to_remove = []
+        for frame_name, frame_obj in self.frames.items():
+            if frame_name not in [base[0] for base in self.base_nav_items]:
+                if frame_name not in active_plugin_tab_ids:
+                    frame_obj.destroy()
+                    keys_to_remove.append(frame_name)
+                    
+        for k in keys_to_remove:
+            self.frames.pop(k, None)
+            
+        # Instantiate newly registered tab frames if not exist
+        for t in tabs:
+            if t["tab_id"] not in self.frames:
+                widget_class = t["widget_class"]
+                try:
+                    # widget_class must accept (master)
+                    frame_instance = widget_class(self.main_cont)
+                    self.frames[t["tab_id"]] = frame_instance
+                except Exception as e:
+                    logging.error(f"Failed to instantiate plugin tab {t['tab_id']}: {e}")
+
+        # If current frame was deleted, switch back to editor
+        if getattr(self, "_current_active_tab", "editor") not in self.frames:
+            self.show_frame("editor")
+            
+        if "plugins" in self.frames and hasattr(self.frames["plugins"], "_refresh_list"):
+            self.frames["plugins"]._refresh_list()
+
     def show_frame(self, name):
         for f in self.frames.values():
             f.pack_forget()
         self.frames[name].pack(fill="both", expand=True)
+        if name == "plugins" and hasattr(self.frames["plugins"], "_refresh_list"):
+            self.frames["plugins"]._refresh_list()
+            
         self._set_nav_active(name)
-        self.set_status(f"● {name.replace('_', ' ').title()}", "ready")
+        
+        display_name = name.replace('_', ' ').title()
+        if name == "editor": display_name = "Score Editor"
+        elif name == "audio": display_name = "Audio AI"
+        elif name == "settings": display_name = "Settings"
+        elif name == "plugins": display_name = "Plugins"
+            
+        self.set_status(f"● {tr(display_name)}", "ready")
+        
+    def _refresh_nav_translations(self):
+        self._refresh_plugin_ui()
+        self.save_btn.configure(text=f"💾  {tr('Save Project')}")
+        self.load_btn.configure(text=f"📂  {tr('Load Project')}")
+        active_tab = getattr(self, "_current_active_tab", "editor")
+        self.show_frame(active_tab)
 
     def set_status(self, text, level="ready"):
         colors = {"ready":   self.C["success"],
@@ -210,6 +317,16 @@ class MainWindow(ctk.CTk):
                   "error":   self.C["accent2"]}
         self.status_lbl.configure(
             text=text, text_color=colors.get(level, self.C["success"]))
+
+    def show_toast(self, message: str, level: str = "info", duration: int = 3000):
+        toast = ctk.CTkLabel(
+            self, text=f"  {message}  ", corner_radius=8,
+            fg_color=self.C.get("card", "gray20"),
+            text_color=self.C.get("success", "white") if level == "info" else self.C.get("accent2", "red"),
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold")
+        )
+        toast.place(relx=0.5, rely=0.9, anchor="center")
+        self.after(duration, toast.destroy)
 
     def get_project_data(self):
         ed = self.frames["editor"]
@@ -237,6 +354,11 @@ class MainWindow(ctk.CTk):
         if not fp:
             return
         data = self.get_project_data()
+        
+        # Trigger on_project_save hook
+        if hasattr(self, 'plugin_manager_instance'):
+            self.plugin_manager_instance.trigger_hook("on_project_save", data)
+            
         save_roneat_project(fp, data)
         self.frames["editor"]._last_zip_path = fp
         self.set_status(f"● Saved: {os.path.basename(fp)}", "ready")
@@ -273,6 +395,11 @@ class MainWindow(ctk.CTk):
             ed._run_validation()
             self.show_frame("editor")
             self.set_status(f"● Loaded: {os.path.basename(fp)}", "ready")
+            
+            # Trigger hook
+            if hasattr(self, 'plugin_manager_instance'):
+                self.plugin_manager_instance.trigger_hook("on_project_open", data)
+
 
     def import_from_audio(self, notes_str, is_two_mallets,
                           sync_data=None, audio_path=None):

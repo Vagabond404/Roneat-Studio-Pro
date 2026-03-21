@@ -25,15 +25,15 @@ class SettingsPage(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
 
         self.C = {
-            "bg":       ("gray96", "#0d1117"),
-            "card":     ("white",  "#161b22"),
-            "card2":    ("gray97", "#1c2128"),
-            "border":   ("gray80", "#30363d"),
-            "accent":   "#c8a96e",
+            "bg":       ("gray96", "#090a0f"),
+            "card":     ("white",  "#161a22"),
+            "card2":    ("gray97", "#1c212b"),
+            "border":   ("gray80", "#242933"),
+            "accent":   "#D4AF37",
             "accent2":  "#e85d4a",
             "blue":     "#3d8ec9",
             "green":    "#3ab87a",
-            "text":     ("gray10", "gray92"),
+            "text":     ("gray10", "gray95"),
             "text_dim": ("gray45", "#8b949e"),
             "warn":     "#f59e0b",
         }
@@ -54,12 +54,12 @@ class SettingsPage(ctk.CTkFrame):
         hdr.pack(fill="x", padx=36, pady=(36, 0))
         ctk.CTkLabel(
             hdr, text="⚙  Settings",
-            font=ctk.CTkFont(family="Georgia", size=26, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=28, weight="bold"),
             text_color=self.C["accent"]
         ).pack(anchor="w")
         ctk.CTkLabel(
             hdr, text="Appearance, tuning presets, and instrument calibration",
-            font=ctk.CTkFont(size=12), text_color=self.C["text_dim"]
+            font=ctk.CTkFont(family="Segoe UI", size=13), text_color=self.C["text_dim"]
         ).pack(anchor="w", pady=(4, 0))
 
         ctk.CTkFrame(scroll, height=1, fg_color=self.C["border"]).pack(
@@ -117,7 +117,7 @@ class SettingsPage(ctk.CTkFrame):
 
         ctk.CTkLabel(
             instr, text="📋  Recording instructions",
-            font=ctk.CTkFont(family="Georgia", size=13, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=self.C["accent"]
         ).pack(anchor="w", padx=16, pady=(12, 6))
 
@@ -169,11 +169,11 @@ class SettingsPage(ctk.CTkFrame):
         self.cal_btn = ctk.CTkButton(
             bottom, text="⚡  Run Calibration Now",
             command=self._run_calibration,
-            height=46, corner_radius=10,
+            height=46, corner_radius=12,
             fg_color=self.C["green"], hover_color="#2d8c5f",
-            text_color="#0d1117",
-            font=ctk.CTkFont(family="Georgia", size=14, weight="bold"),
-            width=210
+            text_color="#090a0f",
+            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+            width=230
         )
         self.cal_btn.pack(side="left")
 
@@ -310,7 +310,7 @@ class SettingsPage(ctk.CTkFrame):
         h.pack(fill="x", padx=22, pady=(16, 10))
         ctk.CTkLabel(
             h, text=title,
-            font=ctk.CTkFont(family="Georgia", size=15, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
             text_color=self.C["accent"]
         ).pack(anchor="w")
         ctk.CTkFrame(card, height=1, fg_color=self.C["border"]).pack(

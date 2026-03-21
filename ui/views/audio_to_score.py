@@ -34,16 +34,16 @@ class AudioToScore(ctk.CTkFrame):
         self._anim_job       = None
 
         self.C = {
-            "bg":       ("gray96", "#0d1117"),
-            "card":     ("white",  "#161b22"),
-            "card2":    ("gray95", "#1c2128"),
-            "border":   ("gray80", "#30363d"),
-            "accent":   "#c8a96e",
+            "bg":       ("gray96", "#090a0f"),
+            "card":     ("white",  "#161a22"),
+            "card2":    ("gray95", "#1c212b"),
+            "border":   ("gray80", "#242933"),
+            "accent":   "#D4AF37",
             "accent2":  "#e85d4a",
             "blue":     "#3d8ec9",
             "green":    "#3ab87a",
             "warn":     "#f59e0b",
-            "text":     ("gray10", "gray92"),
+            "text":     ("gray10", "gray95"),
             "text_dim": ("gray45", "#8b949e"),
         }
 
@@ -67,13 +67,13 @@ class AudioToScore(ctk.CTkFrame):
         hdr.grid(row=0, column=0, sticky="ew", padx=48, pady=(40, 0))
         ctk.CTkLabel(
             hdr, text="🎤  Audio AI  —  Convert Audio to Score",
-            font=ctk.CTkFont(family="Georgia", size=26, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=28, weight="bold"),
             text_color=self.C["accent"]
         ).pack(anchor="w")
         ctk.CTkLabel(
             hdr,
             text="Import a recording and let the AI transcribe it into Roneat notation.",
-            font=ctk.CTkFont(size=13), text_color=self.C["text_dim"]
+            font=ctk.CTkFont(family="Segoe UI", size=14), text_color=self.C["text_dim"]
         ).pack(anchor="w", pady=(5, 0))
         ctk.CTkFrame(self.scroll, height=1, fg_color=self.C["border"]).grid(
             row=1, column=0, sticky="ew", padx=40, pady=(14, 20)
@@ -178,10 +178,10 @@ class AudioToScore(ctk.CTkFrame):
             right,
             text="✨  Generate Score with AI",
             command=self.start_analysis,
-            state="disabled", height=56, corner_radius=12,
-            fg_color=self.C["accent"], text_color="#0d1117",
-            hover_color="#deba7e",
-            font=ctk.CTkFont(family="Georgia", size=15, weight="bold")
+            state="disabled", height=60, corner_radius=14,
+            fg_color=self.C["accent"], text_color="#090a0f",
+            hover_color="#e6c45c",
+            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold")
         )
         self.gen_btn.pack(fill="x", padx=20, pady=(20, 8))
         ctk.CTkLabel(
@@ -248,7 +248,7 @@ class AudioToScore(ctk.CTkFrame):
         ctk.CTkLabel(
             res_hdr,
             text="Generated Score",
-            font=ctk.CTkFont(family="Georgia", size=15, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
             text_color=self.C["accent"]
         ).pack(side="left")
         self.copy_btn = ctk.CTkButton(
@@ -263,9 +263,9 @@ class AudioToScore(ctk.CTkFrame):
         self.copy_btn.pack(side="right")
 
         self.result_box = ctk.CTkTextbox(
-            self.result_card, height=120, corner_radius=8,
+            self.result_card, height=130, corner_radius=10,
             fg_color=self.C["card2"],
-            font=ctk.CTkFont(family="Courier", size=15), wrap="word",
+            font=ctk.CTkFont(family="Consolas", size=16), wrap="word",
             border_width=0
         )
         self.result_box.pack(fill="x", padx=20, pady=(0, 16))
@@ -274,10 +274,10 @@ class AudioToScore(ctk.CTkFrame):
             self.result_card,
             text="➔  Import to Score Editor",
             command=self.send_to_editor,
-            state="disabled", height=48, corner_radius=10,
+            state="disabled", height=50, corner_radius=12,
             fg_color=self.C["green"], hover_color="#2d8c5f",
-            text_color="#0d1117",
-            font=ctk.CTkFont(size=13, weight="bold")
+            text_color="#090a0f",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold")
         )
         self.import_btn.pack(fill="x", padx=20, pady=(0, 20))
 

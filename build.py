@@ -20,7 +20,7 @@ import shutil
 # ══════════════════════════════════════════════════════════════════════════════
 
 APP_NAME    = "Roneat Studio Pro"
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.2.0"
 
 # Path to ffmpeg.exe (placed next to main.py)
 FFMPEG_EXE  = "ffmpeg.exe"
@@ -106,7 +106,19 @@ def run():
     print(f"{'='*60}\n")
 
     # Check PyInstaller is installed
-    if not shutil.which("pyinstaller"):
+    found_pyinstaller = False
+    if shutil.which("pyinstaller"):
+        found_pyinstaller = True
+    else:
+        try:
+            res = subprocess.run([sys.executable, "-m", "PyInstaller", "--version"], 
+                                 capture_output=True, creationflags=0 if sys.platform != "win32" else subprocess.CREATE_NO_WINDOW)
+            if res.returncode == 0:
+                found_pyinstaller = True
+        except Exception:
+            pass
+
+    if not found_pyinstaller:
         print("[ERROR] PyInstaller not found. Run:  pip install pyinstaller")
         sys.exit(1)
 

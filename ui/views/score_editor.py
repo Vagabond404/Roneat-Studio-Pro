@@ -138,16 +138,16 @@ class ScoreEditor(ctk.CTkFrame):
         self._last_play_time = 0.0
 
         self.C = {
-            "bg":       ("gray96", "#0d1117"),
-            "panel":    ("gray93", "#161b22"),
-            "card":     ("white",  "#1c2128"),
-            "card2":    ("gray95", "#1c2128"),
-            "border":   ("gray80", "#30363d"),
-            "accent":   "#c8a96e",
+            "bg":       ("gray96", "#090a0f"),
+            "panel":    ("gray93", "#0f111a"),
+            "card":     ("white",  "#161a22"),
+            "card2":    ("gray95", "#1c212b"),
+            "border":   ("gray80", "#242933"),
+            "accent":   "#D4AF37",
             "accent2":  "#e85d4a",
             "blue":     "#3d8ec9",
             "green":    "#3ab87a",
-            "text":     ("gray10", "gray92"),
+            "text":     ("gray10", "gray95"),
             "text_dim": ("gray45", "#8b949e"),
             "warn":     "#f59e0b",
         }
@@ -175,10 +175,10 @@ class ScoreEditor(ctk.CTkFrame):
         hdr = ctk.CTkFrame(left, fg_color="transparent")
         hdr.grid(row=0, column=0, sticky="ew", padx=28, pady=(28, 0))
         ctk.CTkLabel(hdr, text="🎼  Score Editor",
-                     font=ctk.CTkFont(family="Georgia", size=24, weight="bold"),
+                     font=ctk.CTkFont(family="Segoe UI", size=26, weight="bold"),
                      text_color=self.C["accent"]).pack(anchor="w")
         ctk.CTkLabel(hdr, text="Edit, preview, play and export your Roneat score",
-                     font=ctk.CTkFont(size=12),
+                     font=ctk.CTkFont(family="Segoe UI", size=13),
                      text_color=self.C["text_dim"]).pack(anchor="w", pady=(4, 0))
         ctk.CTkFrame(left, height=1, fg_color=self.C["border"]).grid(
             row=0, column=0, sticky="ew", padx=20, pady=(74, 0))
@@ -198,15 +198,15 @@ class ScoreEditor(ctk.CTkFrame):
     def _build_info_card(self, parent):
         card = self._card(parent)
         ctk.CTkLabel(card, text="SONG TITLE",
-                     font=ctk.CTkFont(family="Courier", size=10, weight="bold"),
-                     text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(anchor="w", padx=18, pady=(14, 4))
+                     font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
+                     text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(anchor="w", padx=22, pady=(16, 6))
         self.title_entry = ctk.CTkEntry(
-            card, height=38, corner_radius=8,
+            card, height=42, corner_radius=10,
             border_width=1, border_color=self.C["border"],
             placeholder_text="Song title",
-            font=ctk.CTkFont(family="Georgia", size=14))
+            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"))
         self.title_entry.insert(0, "Bot Sathukar")
-        self.title_entry.pack(fill="x", padx=18, pady=(0, 14))
+        self.title_entry.pack(fill="x", padx=22, pady=(0, 20))
         self.title_entry.bind("<KeyRelease>", self._request_update)
 
     def _build_editor_card(self, parent):
@@ -215,7 +215,7 @@ class ScoreEditor(ctk.CTkFrame):
         hdr_row = ctk.CTkFrame(card, fg_color="transparent")
         hdr_row.pack(fill="x", padx=18, pady=(14, 0))
         ctk.CTkLabel(hdr_row, text="NOTATION  (e.g. 9 8 7#3 - / 5 6)",
-                     font=ctk.CTkFont(family="Courier", size=10, weight="bold"),
+                     font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
                      text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(side="left")
         self.copy_notation_btn = ctk.CTkButton(
             hdr_row, text="⧉  Copy", command=self._copy_notation,
@@ -237,9 +237,9 @@ class ScoreEditor(ctk.CTkFrame):
         self.valid_lbl.pack(side="left", padx=(6, 0))
 
         self.notes_box = ctk.CTkTextbox(
-            card, height=145, corner_radius=8,
+            card, height=155, corner_radius=10,
             border_width=1, border_color=self.C["border"],
-            font=ctk.CTkFont(family="Courier", size=15), wrap="word")
+            font=ctk.CTkFont(family="Consolas", size=16), wrap="word")
         self.notes_box.insert("0.0",
             "9 8 6 5 6 4 5 6 9 11 12 9 10 11 12 9 / "
             "10 9 8 7 8 7 5 4 2 4 5 7 4 5 7 8")
@@ -268,16 +268,16 @@ class ScoreEditor(ctk.CTkFrame):
         pb = ctk.CTkFrame(card, fg_color="transparent")
         pb.pack(fill="x", padx=18, pady=(10, 0))
         self.play_btn = ctk.CTkButton(pb, text="▶  Play", command=self.play_audio,
-                                      width=80, height=36, corner_radius=8,
+                                      width=90, height=40, corner_radius=10,
                                       fg_color=self.C["green"], hover_color="#2d8c5f",
-                                      text_color="#0d1117",
-                                      font=ctk.CTkFont(size=13, weight="bold"))
-        self.play_btn.pack(side="left", padx=(0, 6))
+                                      text_color="#090a0f",
+                                      font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"))
+        self.play_btn.pack(side="left", padx=(0, 8))
         self.stop_btn = ctk.CTkButton(pb, text="⏹  Stop", command=self.stop_audio,
-                                      width=70, height=36, corner_radius=8,
+                                      width=80, height=40, corner_radius=10,
                                       fg_color=self.C["accent2"], hover_color="#c0392b",
-                                      text_color="#0d1117",
-                                      font=ctk.CTkFont(size=13, weight="bold"))
+                                      text_color="#090a0f",
+                                      font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"))
         self.stop_btn.pack(side="left", padx=(0, 10))
 
         ctk.CTkLabel(pb, text="BPM",
@@ -312,7 +312,7 @@ class ScoreEditor(ctk.CTkFrame):
         hdr = ctk.CTkFrame(card, fg_color="transparent")
         hdr.pack(fill="x", padx=18, pady=(12, 0))
         ctk.CTkLabel(hdr, text="NOTATION GUIDE",
-                     font=ctk.CTkFont(family="Courier", size=10, weight="bold"),
+                     font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
                      text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(side="left")
         self._guide_visible = False
         self._guide_toggle_btn = ctk.CTkButton(
@@ -354,7 +354,7 @@ class ScoreEditor(ctk.CTkFrame):
     def _build_audio_mode_card(self, parent):
         card = self._card(parent)
         ctk.CTkLabel(card, text="AUDIO ENGINE",
-                     font=ctk.CTkFont(family="Courier", size=10, weight="bold"),
+                     font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
                      text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(anchor="w", padx=18, pady=(14, 6))
         self._audio_mode_var = ctk.StringVar(value="adsr")
         row = ctk.CTkFrame(card, fg_color="transparent")
@@ -406,7 +406,7 @@ class ScoreEditor(ctk.CTkFrame):
     def _build_presets_card(self, parent):
         card = self._card(parent)
         ctk.CTkLabel(card, text="PRESETS",
-                     font=ctk.CTkFont(family="Courier", size=10, weight="bold"),
+                     font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
                      text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(anchor="w", padx=18, pady=(14, 6))
         self.preset_combo = ctk.CTkComboBox(
             card, values=self._get_preset_names(),
@@ -439,7 +439,7 @@ class ScoreEditor(ctk.CTkFrame):
     def _build_customize_card(self, parent):
         card = self._card(parent)
         ctk.CTkLabel(card, text="DISPLAY SETTINGS",
-                     font=ctk.CTkFont(family="Courier", size=10, weight="bold"),
+                     font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
                      text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(anchor="w", padx=18, pady=(14, 6))
         self._row_label(card, "Measure Style")
         self.measure_combo = ctk.CTkComboBox(
@@ -490,7 +490,7 @@ class ScoreEditor(ctk.CTkFrame):
     def _build_export_card(self, parent):
         card = self._card(parent)
         ctk.CTkLabel(card, text="EXPORT",
-                     font=ctk.CTkFont(family="Courier", size=10, weight="bold"),
+                     font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
                      text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(anchor="w", padx=18, pady=(14, 8))
         self.export_pdf_btn = ctk.CTkButton(
             card, text="Export to PDF", command=self.export_pdf,
@@ -533,7 +533,7 @@ class ScoreEditor(ctk.CTkFrame):
         hdr = ctk.CTkFrame(right, fg_color="transparent")
         hdr.grid(row=0, column=0, sticky="ew", padx=28, pady=(26, 0))
         ctk.CTkLabel(hdr, text="Score Preview",
-                     font=ctk.CTkFont(family="Georgia", size=20, weight="bold"),
+                     font=ctk.CTkFont(family="Segoe UI", size=22, weight="bold"),
                      text_color=self.C["accent"]).pack(side="left")
 
         view_frame = ctk.CTkFrame(hdr, fg_color=self.C["card"], corner_radius=10)

@@ -27,3 +27,7 @@ ffmpeg.exe
 *.log
 crash_log.txt
 pylint_report.txt
+
+# Scripts
+build.py
+push_git.py
