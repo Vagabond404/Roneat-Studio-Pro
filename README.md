@@ -15,17 +15,15 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
 ![License](https://img.shields.io/badge/license-Non--Commercial-red.svg)
 
-**Roneat Studio Pro** is a professional software suite designed for transcribing, editing, and exporting sheet music for the **Roneat Ek** (traditional Cambodian xylophone). This software bridges the gap between traditional musical performance and modern digital notation by combining advanced artificial intelligence audio analysis with a specialized 2D score editor.
-
 ---
 
 ## 📋 Table of Contents
 
 - [✨ Core Features](#-core-features)
 - [🧩 Plugin Extensibility (New!)](#-plugin-extensibility-new)
-- [🚀 Requirements & Installation (Source Code)](#-requirements--installation-source-code)
+- [🎤 What is the Roneat Ek?](#-what-is-the-roneat-ek)
+- [🚀 Requirements & Installation](#-requirements--installation-source-code)
 - [🛠️ Building the Executable](#️-building-the-executable)
-- [🔄 Scripts & Automation](#-scripts--automation)
 - [📝 License & Contact](#-license--contact)
 
 ## ✨ Core Features
@@ -48,6 +46,14 @@ Roneat Studio Pro v2.2.0 now features a powerful, **Fully Isolated (Sandboxed) T
 Full plugin management (Enable/Disable/Reload/Uninstall) occurs directly from the native "Plugins" tab. The system features an automatic crash-protection wrapper that catches your plugin's exceptions and safely disables the script to prevent corrupting the host software.
 
 👉 **Learn how to build your own plugins by reading the [Plugin Development Guide (docs/PLUGIN_DEVELOPMENT.md)](docs/PLUGIN_DEVELOPMENT.md).**
+
+## 🎹 What is the Roneat Ek?
+
+The **Roneat Ek (រនាតឯក)** is a traditional Cambodian xylophone with 21 bamboo or hardwood bars, tuned to a pentatonic scale. It is one of the central instruments of classical Khmer court music and pin peat ensembles.
+
+Roneat Studio Pro is the first dedicated digital tool built around its unique notation system and sonic characteristics.
+
+> _Easy to Play, Impossible to Forget._
 
 ## 🚀 Requirements & Installation (Source Code)
 
@@ -91,14 +97,6 @@ To generate a standalone `.exe` file for Windows (the build process will automat
    python build.py
    ```
 *The compiled Roneat Studio Pro executable will be outputted into the `dist/` folder.*
-
-## 🔄 Scripts & Automation
-
-To quickly bundle and push all of your repository changes directly to GitHub:
-```bash
-python push_git.py "Your commit message here"
-```
-*(This automation script performs the `add`, `commit`, and local-to-remote `push` Git operations in a single command).*
 
 ## 📝 License & Contact
 
