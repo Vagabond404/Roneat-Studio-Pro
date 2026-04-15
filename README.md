@@ -26,25 +26,6 @@
 - [🛠️ Building the Executable](#️-building-the-executable)
 - [📝 License & Contact](#-license--contact)
 
-"""
- ██████╗  ██████╗ ███╗   ██╗███████╗███████╗████████╗
- ██╔══██╗██╔═══██╗████╗  ██║██╔════╝██╔════╝╚══██╔══╝
- ██████╔╝██║   ██║██╔██╗ ██║█████╗  ███████╗   ██║   
- ██╔══██╗██║   ██║██║╚██╗██║██╔══╝  ╚════██║   ██║   
- ██║  ██║╚██████╔╝██║ ╚████║███████╗███████║   ██║   
- ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝╚══════╝   ╚═╝   
-                                                     
- ███████╗████████╗██╗   ██╗██████╗ ██╗ ██████╗ 
- ██╔════╝╚══██╔══╝██║   ██║██╔══██╗██║██╔═══██╗
- ███████╗   ██║   ██║   ██║██║  ██║██║██║   ██║
- ╚════██║   ██║   ██║   ██║██║  ██║██║██║   ██║
- ███████║   ██║   ╚██████╔╝██████╔╝██║╚██████╔╝
- ╚══════╝   ╚═╝    ╚═════╝ ╚═════╝ ╚═╝ ╚═════╝ 
-
- Welcome to the Core Engine of Roneat Studio Pro.
- Traditional Cambodian Heritage meets Modern Engineering.
-"""
-
 ## ✨ Core Features
 
 - **🎼 Professional Score Editor**: An interactive 2D editor specifically designed for Roneat notation. Features fluid visualization and real-time playback.
