@@ -1,8 +1,13 @@
 """
-ui/views/settings_page.py
-=========================
+ui/views/settings_page.py  v4.0
+=================================
 Roneat Studio Pro — Settings Page
-Includes: Theme, Hz Tuning, and Fingerprint Calibration
+
+Premium DAW Edition:
+  - Unified aesthetic with Score Editor and Audio AI
+  - Improved layout for Calibration instructions
+  - Sleeker Hz tuning grid
+  - Polished color palette and typography
 """
 
 import customtkinter as ctk
@@ -21,20 +26,26 @@ from core.calibration import (
 
 
 class SettingsPage(ctk.CTkFrame):
+    def _clr(self, color):
+        if isinstance(color, (list, tuple)):
+            return color[1] if ctk.get_appearance_mode() == "Dark" else color[0]
+        return color
+
     def __init__(self, master):
         super().__init__(master, fg_color="transparent")
 
         self.C = {
-            "bg":       ("gray96", "#090a0f"),
-            "card":     ("white",  "#161a22"),
-            "card2":    ("gray97", "#1c212b"),
-            "border":   ("gray80", "#242933"),
+            "bg":       ("#F2F2F2", "#0F1115"),
+            "panel":    ("#E8E8E8", "#16191E"),
+            "card":     ("#FFFFFF", "#1E2229"),
+            "card2":    ("#F8F8F8", "#252A33"),
+            "border":   ("#CCCCCC", "#303642"),
             "accent":   "#D4AF37",
             "accent2":  "#e85d4a",
             "blue":     "#3d8ec9",
             "green":    "#3ab87a",
-            "text":     ("gray10", "gray95"),
-            "text_dim": ("gray45", "#8b949e"),
+            "text":     ("#1A1A1A", "#E0E6ED"),
+            "text_dim": ("#666666", "#7A8496"),
             "warn":     "#f59e0b",
         }
 
@@ -43,202 +54,237 @@ class SettingsPage(ctk.CTkFrame):
         self._single_path_var  = tk.StringVar(value="No file selected")
         self._two_path_var     = tk.StringVar(value="No file selected")
 
-        scroll = ctk.CTkScrollableFrame(
-            self, fg_color=self.C["bg"],
-            scrollbar_button_color=self.C["accent"]
+        self.scroll = ctk.CTkScrollableFrame(
+            self, fg_color = self.C["bg"],
+            scrollbar_button_color = self.C["accent"],
+            scrollbar_button_hover_color = "#E6C45C"
         )
-        scroll.pack(fill="both", expand=True)
+        self.scroll.pack(fill="both", expand=True)
 
-        # Header
-        hdr = ctk.CTkFrame(scroll, fg_color="transparent")
-        hdr.pack(fill="x", padx=36, pady=(36, 0))
+        # ── Header ────────────────────────────────────────────────────────────
+        hdr = ctk.CTkFrame(self.scroll, fg_color="transparent")
+        hdr.pack(fill="x", padx=52, pady=(44, 0))
+        
         ctk.CTkLabel(
-            hdr, text="⚙  Settings",
-            font=ctk.CTkFont(family="Segoe UI", size=28, weight="bold"),
-            text_color=self.C["accent"]
+            hdr, text="⚙  System Preferences",
+            font=ctk.CTkFont(family="Segoe UI", size=32, weight="bold"),
+            text_color = self.C["accent"]
         ).pack(anchor="w")
+        
         ctk.CTkLabel(
-            hdr, text="Appearance, tuning presets, and instrument calibration",
-            font=ctk.CTkFont(family="Segoe UI", size=13), text_color=self.C["text_dim"]
-        ).pack(anchor="w", pady=(4, 0))
+            hdr, text="Configure appearance, audio engine, and hardware calibration.",
+            font=ctk.CTkFont(family="Segoe UI", size=14), text_color = self.C["text_dim"]
+        ).pack(anchor="w", pady=(6, 0))
 
-        ctk.CTkFrame(scroll, height=1, fg_color=self.C["border"]).pack(
-            fill="x", padx=28, pady=(16, 24)
+        ctk.CTkFrame(self.scroll, height=2, fg_color = self.C["border"]).pack(
+            fill="x", padx=40, pady=(20, 24)
         )
 
-        self._build_appearance(scroll)
-        self._build_calibration(scroll)
-        self._build_tuning(scroll)
+        # ── Sections ──────────────────────────────────────────────────────────
+        self._build_appearance(self.scroll)
+        self._build_audio_engine(self.scroll)
+        self._build_calibration(self.scroll)
+        self._build_tuning(self.scroll)
 
         self.status_lbl = ctk.CTkLabel(
-            scroll, text="",
-            font=ctk.CTkFont(family="Courier", size=12),
-            text_color=self.C["green"]
+            self.scroll, text="",
+            font=ctk.CTkFont(family="Consolas", size=12),
+            text_color = self.C["green"]
         )
-        self.status_lbl.pack(pady=(0, 36))
+        self.status_lbl.pack(pady=(0, 48))
 
         self._reset_default()
+
+    def _section_card(self, parent, title):
+        card = ctk.CTkFrame(
+            parent, fg_color = self.C["card"],
+            corner_radius=18, border_width=1,
+            border_color = self.C["border"]
+        )
+        card.pack(fill="x", padx=40, pady=(0, 24))
+        
+        h = ctk.CTkFrame(card, fg_color="transparent")
+        h.pack(fill="x", padx=24, pady=(20, 12))
+        
+        ctk.CTkLabel(
+            h, text=title,
+            font=ctk.CTkFont(family="Segoe UI", size=18, weight="bold"),
+            text_color = self.C["accent"]
+        ).pack(anchor="w")
+        
+        ctk.CTkFrame(card, height=1, fg_color = self.C["border"]).pack(
+            fill="x", padx=20, pady=(0, 16)
+        )
+        return card
 
     # ─────────────────────────────────────────────────────────────────────────
 
     def _build_appearance(self, parent):
-        card = self._section_card(parent, "🎨  Appearance")
+        card = self._section_card(parent, "🎨  Interface")
         row  = ctk.CTkFrame(card, fg_color="transparent")
-        row.pack(fill="x", padx=22, pady=(0, 18))
+        row.pack(fill="x", padx=24, pady=(0, 20))
+        
         ctk.CTkLabel(
             row, text="Theme Mode",
-            font=ctk.CTkFont(size=13), text_color=self.C["text"]
+            font=ctk.CTkFont(size=14), text_color = self.C["text"]
         ).pack(side="left")
+        
         self.theme_combo = ctk.CTkComboBox(
             row, values=["System", "Light", "Dark"],
             command=self._change_theme,
-            width=150, height=36, corner_radius=8,
-            border_width=1, border_color=self.C["border"],
-            font=ctk.CTkFont(size=13)
+            width=160, height=38, corner_radius=10,
+            border_width=1, border_color = self.C["border"],
+            font=ctk.CTkFont(size=13),
+            dropdown_hover_color = self.C["accent"]
         )
         self.theme_combo.set(load_app_settings().get("theme", "Dark"))
         self.theme_combo.pack(side="right")
 
-    # ─────────────────────────────────────────────────────────────────────────
+    def _build_audio_engine(self, parent):
+        card = self._section_card(parent, "🔊  Audio Engine")
+        from core.audio_player import samples_available
+        
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(fill="x", padx=24, pady=(0, 20))
+        
+        self._audio_mode_var = ctk.StringVar(value=load_app_settings().get("audio_mode", "adsr"))
+        
+        ctk.CTkRadioButton(
+            row, text="Synthesis (High Perf)", variable=self._audio_mode_var, value="adsr",
+            command=self._on_audio_mode_change, fg_color = self.C["accent"],
+            font=ctk.CTkFont(size=13)
+        ).pack(side="left", padx=(0, 30))
+        
+        self._smp_radio = ctk.CTkRadioButton(
+            row, text="Real Samples (High Quality)", variable=self._audio_mode_var, value="samples",
+            command=self._on_audio_mode_change, fg_color = self.C["accent"],
+            font=ctk.CTkFont(size=13)
+        )
+        self._smp_radio.pack(side="left")
+        
+        if not samples_available():
+            self._smp_radio.configure(state="disabled")
+            if self._audio_mode_var.get() == "samples":
+                self._audio_mode_var.set("adsr")
+
+    def _on_audio_mode_change(self):
+        mode = self._audio_mode_var.get()
+        s = load_app_settings()
+        s["audio_mode"] = mode
+        save_app_settings(s)
+        
+        app = self.winfo_toplevel()
+        if hasattr(app, "frames") and "editor" in app.frames:
+            editor = app.frames["editor"]
+            editor.player.mode = mode
+            editor._jam_player.mode = mode
+            editor.player.load_samples()
+            editor._jam_player.load_samples()
+                
+        self.status_lbl.configure(text=f"Engine switched to {mode}", text_color = self.C["green"])
 
     def _build_calibration(self, parent):
-        card = self._section_card(parent, "🎯  Instrument Calibration  —  Audio AI Fingerprinting")
+        card = self._section_card(parent, "🎯  Instrument Fingerprinting")
 
         # Status banner
-        self.cal_banner = ctk.CTkFrame(
-            card, fg_color=self.C["card2"], corner_radius=10
-        )
-        self.cal_banner.pack(fill="x", padx=22, pady=(0, 16))
+        self.cal_banner = ctk.CTkFrame(card, fg_color = self.C["card2"], corner_radius=12)
+        self.cal_banner.pack(fill="x", padx=24, pady=(0, 20))
         self._refresh_banner()
 
-        # Instructions
-        instr = ctk.CTkFrame(card, fg_color=self.C["card2"], corner_radius=10)
-        instr.pack(fill="x", padx=22, pady=(0, 16))
+        # Instructions - Collapsible-like feel
+        instr = ctk.CTkFrame(card, fg_color = self.C["card2"], corner_radius=12, border_width=1, border_color=self.C["border"])
+        instr.pack(fill="x", padx=24, pady=(0, 20))
 
         ctk.CTkLabel(
-            instr, text="📋  Recording instructions",
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
-            text_color=self.C["accent"]
-        ).pack(anchor="w", padx=16, pady=(12, 6))
+            instr, text="Expert Calibration Guide",
+            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+            text_color = self.C["accent"]
+        ).pack(anchor="w", padx=20, pady=(16, 12))
 
         text = (
-            "WHAT IS CALIBRATION?\n"
-            "You record every bar of your specific Roneat instrument once.\n"
-            "The app learns the exact acoustic fingerprint of YOUR instrument,\n"
-            "including its resonance box — turning a flaw into a feature.\n\n"
-            "HOW TO RECORD:\n"
-            "  1.  Use a DAW (Audacity is free) or your phone's voice recorder.\n"
-            "  2.  Record in a quiet room — no background noise, no reverb.\n"
-            "  3.  Single-mallet file:  Strike bars 1 → 21 one at a time, right hand only.\n"
-            "  4.  Two-mallet file:  Strike bars 1 → 13 with BOTH mallets simultaneously.\n"
-            "      (Left hand plays bar+7, so bar 13 + 7 = bar 20 = the max you need.)\n"
-            "  5.  Wait at least 1.5 seconds between each strike — let the note fade.\n"
-            "  6.  Do not move the instrument between strikes.\n"
-            "  7.  Export as WAV (44100 Hz, 16-bit recommended) or MP3.\n\n"
-            "You only need to calibrate ONCE.  Data is saved permanently on your computer."
+            "Create a recording striking every bar of YOUR Roneat Ek from 1 to 21.\n"
+            "This allows the AI to learn the unique harmonic soul of your instrument.\n\n"
+            "• Use a quiet room (no fan/AC noise)\n"
+            "• Single Mallet: Hit bars 1 → 21 in order (right hand)\n"
+            "• Two Mallets: Hit bars 1 → 13 in order (both hands simultaneously)\n"
+            "• Leave 2 seconds of silence between each hit\n"
+            "• Export as high-quality WAV or MP3"
         )
         ctk.CTkLabel(
             instr, text=text,
-            font=ctk.CTkFont(family="Courier", size=11),
-            text_color=self.C["text_dim"],
-            justify="left", wraplength=760, anchor="w"
-        ).pack(anchor="w", padx=16, pady=(0, 14))
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color = self.C["text_dim"],
+            justify="left", wraplength=720, anchor="w"
+        ).pack(anchor="w", padx=20, pady=(0, 20))
 
-        # File import rows
-        self._file_row(
-            card,
-            label="Single Mallet  (bars 1 – 21)",
-            sub="Strike each bar once with the RIGHT mallet only · 21 notes in order",
-            path_var=self._single_path_var,
-            btn_color=self.C["blue"],
-            tag="single"
-        )
-        self._file_row(
-            card,
-            label="Two Mallets  (bars 1 – 13)",
-            sub="Strike each bar with BOTH mallets simultaneously · 13 notes in order",
-            path_var=self._two_path_var,
-            btn_color=self.C["accent"],
-            tag="two"
-        )
+        # File rows
+        self._file_row(card, "Single Mallet  (Bars 1 – 21)", self._single_path_var, self.C["blue"], "single")
+        self._file_row(card, "Two Mallets    (Bars 1 – 13)", self._two_path_var, self.C["accent"], "two")
 
-        # Calibrate button + progress
+        # Action Button
         bottom = ctk.CTkFrame(card, fg_color="transparent")
-        bottom.pack(fill="x", padx=22, pady=(6, 6))
+        bottom.pack(fill="x", padx=24, pady=(12, 12))
 
         self.cal_btn = ctk.CTkButton(
-            bottom, text="⚡  Run Calibration Now",
+            bottom, text="⚡  START CALIBRATION",
             command=self._run_calibration,
-            height=46, corner_radius=12,
-            fg_color=self.C["green"], hover_color="#2d8c5f",
+            height=48, corner_radius=12,
+            fg_color = self.C["green"], hover_color="#2d8c5f",
             text_color="#090a0f",
             font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
-            width=230
+            width=240
         )
         self.cal_btn.pack(side="left")
 
         self.cal_msg = ctk.CTkLabel(
-            bottom, text="Import at least one audio file to calibrate.",
-            font=ctk.CTkFont(family="Courier", size=11),
-            text_color=self.C["text_dim"]
+            bottom, text="Import audio to begin analysis.",
+            font=ctk.CTkFont(family="Consolas", size=11),
+            text_color = self.C["text_dim"]
         )
-        self.cal_msg.pack(side="left", padx=(16, 0))
+        self.cal_msg.pack(side="left", padx=(20, 0))
 
-        self.cal_bar = ctk.CTkProgressBar(
-            card, height=6, corner_radius=3,
-            progress_color=self.C["green"]
-        )
+        self.cal_bar = ctk.CTkProgressBar(card, height=10, corner_radius=5, progress_color = self.C["green"])
         self.cal_bar.set(0)
-        # pack later
 
-    def _file_row(self, parent, label, sub, path_var, btn_color, tag):
-        row = ctk.CTkFrame(
-            parent, fg_color=self.C["card2"],
-            corner_radius=10
-        )
-        row.pack(fill="x", padx=22, pady=(0, 8))
+    def _file_row(self, parent, label, path_var, btn_color, tag):
+        row = ctk.CTkFrame(parent, fg_color = self.C["card2"], corner_radius=12)
+        row.pack(fill="x", padx=24, pady=(0, 10))
 
         info = ctk.CTkFrame(row, fg_color="transparent")
-        info.pack(side="left", fill="both", expand=True, padx=14, pady=10)
+        info.pack(side="left", fill="both", expand=True, padx=16, pady=12)
 
         ctk.CTkLabel(
             info, text=label,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            text_color=self.C["text"]
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color = self.C["text"]
         ).pack(anchor="w")
-        ctk.CTkLabel(
-            info, text=sub,
-            font=ctk.CTkFont(family="Courier", size=10),
-            text_color=self.C["text_dim"]
-        ).pack(anchor="w", pady=(2, 0))
+        
         ctk.CTkLabel(
             info, textvariable=path_var,
-            font=ctk.CTkFont(family="Courier", size=10),
-            text_color=self.C["accent"]
-        ).pack(anchor="w", pady=(2, 0))
+            font=ctk.CTkFont(family="Consolas", size=10),
+            text_color = self.C["accent"]
+        ).pack(anchor="w", pady=(4, 0))
 
         ctk.CTkButton(
-            row, text="Browse",
+            row, text="Select File",
             command=lambda t=tag: self._browse(t),
-            width=90, height=34, corner_radius=8,
+            width=110, height=36, corner_radius=10,
             fg_color=btn_color,
-            hover_color="#2d6a9f" if btn_color == self.C["blue"] else "#b8943e",
-            text_color="#0d1117",
+            hover_color=("#2d6a9f" if btn_color == self.C["blue"] else "#E6C45C"),
+            text_color="#0D1117",
             font=ctk.CTkFont(size=12, weight="bold")
-        ).pack(side="right", padx=14, pady=10)
-
-    # ─────────────────────────────────────────────────────────────────────────
+        ).pack(side="right", padx=16, pady=12)
 
     def _build_tuning(self, parent):
-        card = self._section_card(parent, "🎹  Roneat Bar Tuning  (Hz)")
+        card = self._section_card(parent, "🎹  Hz Tuning Matrix")
 
         ctk.CTkLabel(
-            card, text="Bar 1 = highest note (~1308 Hz)   ·   Bar 21 = lowest note (~177 Hz)",
-            font=ctk.CTkFont(size=11), text_color=self.C["text_dim"]
-        ).pack(anchor="w", padx=22, pady=(0, 12))
+            card, text="Note: Bar 1 is the highest pitch (~1308 Hz), Bar 21 is the lowest (~177 Hz).",
+            font=ctk.CTkFont(size=11), text_color = self.C["text_dim"]
+        ).pack(anchor="w", padx=24, pady=(0, 16))
 
         grid = ctk.CTkFrame(card, fg_color="transparent")
-        grid.pack(fill="x", padx=22, pady=(0, 14))
+        grid.pack(fill="x", padx=24, pady=(0, 10))
 
         self.hz_entries = {}
         for i in range(1, 22):
@@ -246,192 +292,132 @@ class SettingsPage(ctk.CTkFrame):
             row = (i - 1) // 7
             grid.grid_columnconfigure(col, weight=1)
 
-            cell = ctk.CTkFrame(
-                grid, fg_color=self.C["card2"],
-                corner_radius=10, border_width=1,
-                border_color=self.C["border"]
-            )
-            cell.grid(row=row, column=col, padx=4, pady=4, sticky="ew")
+            cell = ctk.CTkFrame(grid, fg_color = self.C["card2"], corner_radius=10, border_width=1, border_color = self.C["border"])
+            cell.grid(row=row, column=col, padx=5, pady=5, sticky="ew")
 
-            badge = ctk.CTkFrame(
-                cell, fg_color=self.C["accent"],
-                width=26, height=26, corner_radius=6
-            )
+            badge = ctk.CTkFrame(cell, fg_color = self.C["accent"], width=28, height=28, corner_radius=7)
             badge.pack(side="left", padx=(8, 6), pady=8)
             badge.pack_propagate(False)
-            ctk.CTkLabel(
-                badge, text=str(i),
-                font=ctk.CTkFont(family="Courier", size=10, weight="bold"),
-                text_color="#0d1117"
-            ).pack(expand=True)
+            ctk.CTkLabel(badge, text=str(i), font=ctk.CTkFont(family="Consolas", size=10, weight="bold"), text_color="#0D1117").pack(expand=True)
 
             entry = ctk.CTkEntry(
-                cell, width=72, height=28, corner_radius=6,
-                border_width=1, border_color=self.C["border"],
-                font=ctk.CTkFont(family="Courier", size=12)
+                cell, width=80, height=30, corner_radius=6, border_width=0,
+                fg_color="transparent", font=ctk.CTkFont(family="Consolas", size=13)
             )
             entry.pack(side="left", pady=8, padx=(0, 8))
             self.hz_entries[i] = entry
 
         btns = ctk.CTkFrame(card, fg_color="transparent")
-        btns.pack(fill="x", padx=22, pady=(0, 18))
+        btns.pack(fill="x", padx=24, pady=(16, 24))
 
         ctk.CTkButton(
-            btns, text="Reset to Default",
+            btns, text="RESET ALL",
             command=self._reset_default,
-            fg_color="transparent", text_color=self.C["accent"],
-            border_width=1, border_color=self.C["accent"],
-            hover_color=self.C["card"],
-            height=38, corner_radius=10,
-            font=ctk.CTkFont(size=13, weight="bold"), width=150
-        ).pack(side="left", padx=(0, 10))
+            fg_color="transparent", text_color = self.C["accent"],
+            border_width=1, border_color = self.C["accent"],
+            hover_color = self.C["card2"],
+            height=40, corner_radius=10,
+            font=ctk.CTkFont(size=13, weight="bold"), width=160
+        ).pack(side="left", padx=(0, 12))
 
         ctk.CTkButton(
-            btns, text="Save Tuning",
+            btns, text="SAVE TUNING",
             command=self._apply_tuning,
-            fg_color=self.C["green"], hover_color="#2d8c5f",
+            fg_color = self.C["green"], hover_color="#2d8c5f",
             text_color="#0d1117",
-            height=38, corner_radius=10,
-            font=ctk.CTkFont(size=13, weight="bold"), width=130
+            height=40, corner_radius=10,
+            font=ctk.CTkFont(size=13, weight="bold"), width=160
         ).pack(side="left")
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Helpers
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _section_card(self, parent, title):
-        card = ctk.CTkFrame(
-            parent, fg_color=self.C["card"],
-            corner_radius=14, border_width=1,
-            border_color=self.C["border"]
-        )
-        card.pack(fill="x", padx=28, pady=(0, 22))
-        h = ctk.CTkFrame(card, fg_color="transparent")
-        h.pack(fill="x", padx=22, pady=(16, 10))
-        ctk.CTkLabel(
-            h, text=title,
-            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
-            text_color=self.C["accent"]
-        ).pack(anchor="w")
-        ctk.CTkFrame(card, height=1, fg_color=self.C["border"]).pack(
-            fill="x", padx=18, pady=(0, 12)
-        )
-        return card
 
     def _refresh_banner(self):
-        for w in self.cal_banner.winfo_children():
-            w.destroy()
+        for w in self.cal_banner.winfo_children(): w.destroy()
         single_fps, two_fps = load_fingerprints()
         has_s = single_fps and len(single_fps) > 0
-        has_t = two_fps    and len(two_fps)    > 0
+        has_t = two_fps and len(two_fps) > 0
+        
         if has_s or has_t:
-            parts = []
-            if has_s: parts.append(f"Single mallet: {len(single_fps)} bars ✓")
-            if has_t: parts.append(f"Two mallets: {len(two_fps)} bars ✓")
-            msg   = "  Calibration active:  " + "   |   ".join(parts)
-            color = self.C["green"]
-            icon  = "✅"
+            msg = "⚡  Calibration Matrix Loaded"
+            color = self._clr(self.C["green"])
+            icon = "✅"
         else:
-            msg   = "  No calibration found.  Audio AI will use pitch detection fallback (less accurate)."
-            color = self.C["warn"]
-            icon  = "⚠️"
+            msg = "Calibration missing. Audio engine using FFT synthesis."
+            color = self._clr(self.C["warn"])
+            icon = "⚠️"
+            
         ctk.CTkLabel(
             self.cal_banner, text=f"{icon}  {msg}",
-            font=ctk.CTkFont(family="Courier", size=11),
+            font=ctk.CTkFont(family="Consolas", size=12, weight="bold"),
             text_color=color
-        ).pack(anchor="w", padx=14, pady=10)
+        ).pack(anchor="w", padx=20, pady=14)
 
     def _browse(self, tag):
         path = filedialog.askopenfilename(
             parent=self.winfo_toplevel(),
-            title="Select calibration audio",
+            title="Select Source Audio",
             filetypes=[("Audio Files", "*.wav *.mp3")]
         )
         if path:
             name = os.path.basename(path)
             if tag == "single":
                 self._single_full_path = path
-                self._single_path_var.set(f"  ✓  {name}")
+                self._single_path_var.set(f"Selected: {name}")
             else:
                 self._two_full_path = path
-                self._two_path_var.set(f"  ✓  {name}")
-            self.cal_msg.configure(
-                text="Files ready. Click 'Run Calibration Now' to process.",
-                text_color=self.C["accent"]
-            )
+                self._two_path_var.set(f"Selected: {name}")
+            self.cal_msg.configure(text="Source ready. Execute calibration.", text_color = self.C["accent"])
 
     def _run_calibration(self):
         if not self._single_full_path and not self._two_full_path:
-            self.cal_msg.configure(
-                text="Please import at least one audio file first.",
-                text_color=self.C["accent2"]
-            )
+            self.cal_msg.configure(text="Error: No audio source found.", text_color=self.C["accent2"])
             return
-        self.cal_btn.configure(state="disabled", text="Calibrating…")
-        self.cal_bar.pack(fill="x", padx=22, pady=(0, 12))
+        self.cal_btn.configure(state="disabled", text="ANALYZING...")
+        self.cal_bar.pack(fill="x", padx=24, pady=(0, 20))
         self.cal_bar.set(0)
         threading.Thread(target=self._cal_worker, daemon=True).start()
 
     def _cal_worker(self):
-        single_fps = None
-        two_fps    = None
-
+        s_fps = None; t_fps = None
         def prog(pct, msg):
             self.after(0, lambda p=pct, m=msg: (
                 self.cal_bar.set(p / 100.0),
-                self.cal_msg.configure(text=m, text_color=self.C["text_dim"])
+                self.cal_msg.configure(text=m, text_color = self.C["text_dim"])
             ))
-
         try:
             if self._single_full_path:
-                print("--- Calibrating single mallet (21 bars) ---")
-                single_fps = calibrate_from_audio(
-                    self._single_full_path, 21,
-                    progress_callback=lambda p, m: prog(int(p * 0.5), m)
-                )
+                s_fps = calibrate_from_audio(self._single_full_path, 21, progress_callback=lambda p, m: prog(int(p * 0.5), m))
             if self._two_full_path:
-                print("--- Calibrating two mallets (13 bars) ---")
-                two_fps = calibrate_from_audio(
-                    self._two_full_path, 13,
-                    progress_callback=lambda p, m: prog(50 + int(p * 0.5), m)
-                )
-            if single_fps or two_fps:
-                save_fingerprints(single_fps, two_fps)
+                t_fps = calibrate_from_audio(self._two_full_path, 13, progress_callback=lambda p, m: prog(50 + int(p * 0.5), m))
+            if s_fps or t_fps:
+                save_fingerprints(s_fps, t_fps)
                 self.after(0, self._cal_success)
             else:
-                self.after(0, lambda: self._cal_fail(
-                    "Could not detect enough onsets. Check audio and retry."
-                ))
+                self.after(0, lambda: self._cal_fail("Spectral density too low."))
         except Exception as e:
             self.after(0, lambda err=str(e): self._cal_fail(err))
 
     def _cal_success(self):
         self.cal_bar.set(1.0)
-        self.cal_btn.configure(state="normal", text="⚡  Run Calibration Now")
-        self.cal_msg.configure(
-            text="✅  Calibration saved! Audio AI will now use fingerprint matching.",
-            text_color=self.C["green"]
-        )
+        self.cal_btn.configure(state="normal", text="⚡  START CALIBRATION")
+        self.cal_msg.configure(text="Success: Calibration saved.", text_color = self.C["green"])
         self._refresh_banner()
-        self.status_lbl.configure(
-            text="Calibration complete — fingerprints saved permanently.",
-            text_color=self.C["green"]
-        )
-        self.after(3000, lambda: self.cal_bar.pack_forget())
+        self.after(4000, lambda: self.cal_bar.pack_forget())
 
     def _cal_fail(self, msg):
-        self.cal_btn.configure(state="normal", text="⚡  Run Calibration Now")
-        self.cal_msg.configure(text=f"Error: {msg}", text_color=self.C["accent2"])
-        self.after(3000, lambda: self.cal_bar.pack_forget())
+        self.cal_btn.configure(state="normal", text="⚡  START CALIBRATION")
+        self.cal_msg.configure(text=f"Fail: {msg}", text_color=self.C["accent2"])
+        self.after(4000, lambda: self.cal_bar.pack_forget())
 
     def _change_theme(self, choice):
         ctk.set_appearance_mode(choice)
-        s = load_app_settings()
-        s["theme"] = choice
-        save_app_settings(s)
-        self.status_lbl.configure(
-            text=f"Theme saved: {choice}", text_color=self.C["green"]
-        )
+        s = load_app_settings(); s["theme"] = choice; save_app_settings(s)
+        self.status_lbl.configure(text=f"System appearance preset: {choice}", text_color=self.C["green"])
+        app = self.winfo_toplevel()
+        if hasattr(app, "frames"):
+            for frame in app.frames.values():
+                if hasattr(frame, "update_preview"): frame.update_preview()
+                if hasattr(frame, "_draw_roneat2d"): frame._draw_roneat2d()
 
     def _reset_default(self):
         data = load_hz_preset(os.path.join(PRESETS_DIR, 'default_hz.json'))
@@ -447,18 +433,12 @@ class SettingsPage(ctk.CTkFrame):
         for entry in self.hz_entries.values():
             val = entry.get()
             if not val.isdigit() or not (100 <= int(val) <= 2000):
-                valid = False
-                entry.configure(border_color=self.C["accent2"])
+                valid = False; entry.configure(border_color=self.C["accent2"], border_width=1)
             else:
-                entry.configure(border_color=self.C["border"])
+                entry.configure(border_color = self.C["border"], border_width=0)
         if valid:
-            data = {str(k): int(v.get())
-                    for k, v in self.hz_entries.items() if v.get().isdigit()}
+            data = {str(k): int(v.get()) for k, v in self.hz_entries.items()}
             save_hz_preset(os.path.join(PRESETS_DIR, 'default_hz.json'), data)
-            self.status_lbl.configure(
-                text="Tuning saved.", text_color=self.C["green"]
-            )
+            self.status_lbl.configure(text="Hz Matrix updated successfully.", text_color = self.C["green"])
         else:
-            self.status_lbl.configure(
-                text="Fix invalid values (100–2000 Hz).", text_color=self.C["accent2"]
-            )
+            self.status_lbl.configure(text="Check invalid frequency (100–2000).", text_color=self.C["accent2"])

@@ -10,18 +10,18 @@ class PluginManagerTab(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
         self.pm = plugin_manager
         
-        # Access theme colors from MainWindow
+        # Reads palette from MainWindow if available; fallback is premium dark palette
         self.C = master.master.C if hasattr(master.master, 'C') else {
             "accent":     "#D4AF37",
             "accent2":    "#e85d4a",
             "success":    "#3ab87a",
-            "text":       ("gray10", "gray95"),
-            "text_dim":   ("gray45", "#8b949e"),
-            "sidebar_bg": ("gray92", "#090a0f"),
-            "border":     ("gray80", "#1c2128"),
-            "hover":      ("gray85", "#161b22"),
-            "main_bg":    ("gray96", "#12151c"),
-            "card":       ("white",  "#161b22"),
+            "text":       ("#E0E0E0", "#E0E0E0"),
+            "text_dim":   ("#888888", "#888888"),
+            "sidebar_bg": ("#1E1E1E", "#1E1E1E"),
+            "border":     ("#333333", "#333333"),
+            "hover":      ("#2A2A2A", "#2A2A2A"),
+            "main_bg":    ("#121212", "#121212"),
+            "card":       ("#252525", "#252525"),
         }
         
         self.grid_rowconfigure(1, weight=1)
@@ -36,7 +36,7 @@ class PluginManagerTab(ctk.CTkFrame):
         
         ctk.CTkLabel(title_row, text="🧩 Plugin Manager", 
                      font=ctk.CTkFont(family="Segoe UI", size=26, weight="bold"),
-                     text_color=self.C["text"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text"][0]).pack(side="left")
+                     text_color=self.C["text"]).pack(side="left")
                      
         ctk.CTkButton(title_row, text="➕ Install Plugin (.zip)",
                       fg_color=self.C["accent"], text_color="#090a0f",

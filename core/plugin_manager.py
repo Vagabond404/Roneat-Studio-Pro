@@ -44,6 +44,7 @@ class PluginManager:
         self.plugin_state_history = []
         
         self._current_executing_plugin = None
+        self._active_instrument_plugin_id = "roneat_ek"  # Default instrument
 
     def initialize(self, app):
         """Called upon MainWindow creation. Initializes API and loads active plugins."""
@@ -298,6 +299,56 @@ class PluginManager:
         """Triggers a hook on all active plugins."""
         for plugin_id in list(self.plugins.keys()):
             self.trigger_hook_for_plugin(plugin_id, hook_name, *args, **kwargs)
+
+    def get_active_instrument_plugin_id(self) -> str:
+        """Get the ID of the currently active instrument plugin.
+        
+        Returns:
+            str: The ID of the active instrument plugin (default: "roneat_ek").
+        """
+        return self._active_instrument_plugin_id
+
+    def set_active_instrument_plugin_id(self, plugin_id: str) -> bool:
+        """Set the active instrument plugin.
+        
+        Args:
+            plugin_id: The ID of the instrument plugin to activate.
+            
+        Returns:
+            bool: True if successful, False if plugin not found or not active.
+        """
+        info = self.plugins.get(plugin_id)
+        if not info or not info.active:
+            logging.warning(f"Cannot activate instrument plugin {plugin_id}: not found or inactive")
+            return False
+        
+        self._active_instrument_plugin_id = plugin_id
+        logging.info(f"Active instrument plugin set to: {plugin_id}")
+        return True
+
+    def get_active_instrument_plugin_module(self):
+        """Get the module of the currently active instrument plugin.
+        
+        Returns:
+            The module of the active instrument plugin, or None if not loaded.
+        """
+        info = self.plugins.get(self._active_instrument_plugin_id)
+        if info and info.module:
+            return info.module
+        return None
+
+    def get_available_instruments(self) -> list[tuple[str, str]]:
+        """Get list of available instrument plugins.
+        
+        Returns:
+            List of tuples (plugin_id, plugin_name) for active, instrument-type plugins.
+            Example: [("roneat_ek", "Roneat Ek"), ("other_inst", "Other Instrument")]
+        """
+        instruments = []
+        for plugin_id, info in self.plugins.items():
+            if info.active and info.manifest.get("type") == "instrument":
+                instruments.append((plugin_id, info.name))
+        return sorted(instruments, key=lambda x: x[1])  # Sort by name
 
     def _remove_ui_extensions(self, plugin_id: str):
         """Removes all UI items added by a specific plugin."""

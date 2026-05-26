@@ -1,0 +1,214 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Roneat Studio .roneat File Format",
+  "description": "Universal notation-agnostic format for Roneat Ek xylophone scores",
+  "type": "object",
+  "required": [
+    "file_metadata",
+    "score_metadata",
+    "notes",
+    "display_settings"
+  ],
+  "properties": {
+    "file_metadata": {
+      "type": "object",
+      "description": "File-level metadata",
+      "required": [
+        "version",
+        "created_at",
+        "software_version",
+        "instrument"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "Roneat file format version",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "examples": [
+            "2.3.0"
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "description": "ISO 8601 timestamp when file was created",
+          "format": "date-time",
+          "examples": [
+            "2026-04-15T10:30:00Z"
+          ]
+        },
+        "software_version": {
+          "type": "string",
+          "description": "Version of software that created this file",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "examples": [
+            "2.3.0"
+          ]
+        },
+        "instrument": {
+          "type": "string",
+          "description": "Target instrument for this score",
+          "enum": [
+            "roneat_ek"
+          ]
+        },
+        "instrument_id": {
+          "type": "string",
+          "description": "Active instrument plugin ID (default: roneat_ek)",
+          "default": "roneat_ek",
+          "minLength": 1
+        }
+      }
+    },
+    "score_metadata": {
+      "type": "object",
+      "description": "Score-level metadata",
+      "required": [
+        "title",
+        "author",
+        "tempo_bpm",
+        "time_signature"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Score title",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "author": {
+          "type": "string",
+          "description": "Composer or arranger name",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "tempo_bpm": {
+          "type": "integer",
+          "description": "Tempo in beats per minute",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "time_signature": {
+          "type": "string",
+          "description": "Time signature notation",
+          "pattern": "^\\d+/\\d+$",
+          "examples": [
+            "4/4",
+            "3/4",
+            "2/4"
+          ]
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "description": "Array of notes in the score",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "bar",
+          "beat",
+          "duration",
+          "pitch_numeric",
+          "pitch_midi",
+          "velocity",
+          "hand",
+          "repetition_count"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Unique note identifier",
+            "minimum": 1
+          },
+          "bar": {
+            "type": "integer",
+            "description": "Measure/bar number (1-indexed)",
+            "minimum": 1
+          },
+          "beat": {
+            "type": "number",
+            "description": "Beat position within the bar (1.0-indexed)",
+            "minimum": 1.0,
+            "examples": [
+              1.0,
+              1.5,
+              2.0
+            ]
+          },
+          "duration": {
+            "type": "number",
+            "description": "Duration in beats (4.0=whole, 2.0=half, 1.0=quarter, 0.5=eighth, 0.25=sixteenth)",
+            "minimum": 0.25,
+            "examples": [
+              4.0,
+              2.0,
+              1.0,
+              0.5,
+              0.25
+            ]
+          },
+          "pitch_numeric": {
+            "type": "integer",
+            "description": "Numeric pitch (1-21 for Roneat Ek bar number)",
+            "minimum": 1,
+            "maximum": 21
+          },
+          "pitch_midi": {
+            "type": "integer",
+            "description": "MIDI note number (0-127)",
+            "minimum": 0,
+            "maximum": 127
+          },
+          "velocity": {
+            "type": "integer",
+            "description": "MIDI velocity (0-127)",
+            "minimum": 0,
+            "maximum": 127
+          },
+          "hand": {
+            "type": "string",
+            "description": "Playing hand",
+            "enum": [
+              "left",
+              "right"
+            ]
+          },
+          "repetition_count": {
+            "type": "integer",
+            "description": "Number of repetitions (e.g., 7#6 = repeat 6 times)",
+            "minimum": 1,
+            "default": 1
+          }
+        }
+      }
+    },
+    "display_settings": {
+      "type": "object",
+      "description": "Display preferences (does not affect note data)",
+      "required": [
+        "notation_mode",
+        "theme"
+      ],
+      "properties": {
+        "notation_mode": {
+          "type": "string",
+          "description": "Notation display mode",
+          "enum": [
+            "numeric",
+            "syllabic",
+            "classic"
+          ]
+        },
+        "theme": {
+          "type": "string",
+          "description": "UI theme preference",
+          "enum": [
+            "dark",
+            "light"
+          ]
+        }
+      }
+    }
+  }
+}

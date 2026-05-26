@@ -8,3 +8,4 @@ imageio
 imageio-ffmpeg
 Pillow
 scipy
+eel

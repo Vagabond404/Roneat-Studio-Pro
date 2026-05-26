@@ -108,6 +108,11 @@ def _ui_add_custom_tab(tab_id: str, label: str, icon: str, widget_class: Any):
         API_STATE.plugin_manager.add_custom_tab(tab_id, label, icon, widget_class)
 
 def _ui_show_dialog(title: str, message: str, dialog_type: str = "info"):
+    app = _require_app()
+    if hasattr(app, "get_project_data"):
+        level = "error" if dialog_type == "error" else "warning" if dialog_type == "warning" else "info"
+        _ui_show_toast(f"{title}: {message}", level)
+        return
     if dialog_type == "error":
         messagebox.showerror(title, message)
     elif dialog_type == "warning":
@@ -123,8 +128,16 @@ def _ui_show_toast(message: str, level: str = "info", duration: int = 3000):
         logging.info(f"TOAST ({level}): {message}")
 
 def _ui_create_window(title: str, width: int = 400, height: int = 300):
-    import customtkinter as ctk
     app = _require_app()
+    if hasattr(app, "get_project_data"):
+        _ui_show_toast(f"Window '{title}' requested (Tkinter GUI retired in Web UI)", "warning")
+        class MockWindow:
+            def __init__(self):
+                self.title = lambda t: None
+                self.geometry = lambda g: None
+                self.destroy = lambda: None
+        return MockWindow()
+    import customtkinter as ctk
     win = ctk.CTkToplevel(app)
     win.title(title)
     win.geometry(f"{width}x{height}")
@@ -188,6 +201,13 @@ roneat_api_ui.set_language = _ui_set_language
 def _audio_play_note(bar_index: int, duration: float):
     if not isinstance(bar_index, int) or not isinstance(duration, (int, float)):
         raise TypeError("Invalid types for play_note")
+    app = _require_app()
+    if hasattr(app, "get_project_data"):
+        from core.eel_bridge import jam_player
+        def _play():
+            jam_player.audio_core.trigger_note(bar_index)
+        threading.Thread(target=_play, daemon=True).start()
+        return
     editor = _require_editor()
     if hasattr(editor, "player"):
         def _play():
@@ -199,6 +219,16 @@ def _audio_play_note(bar_index: int, duration: float):
 def _audio_play_frequency(hz: float, duration: float):
     if not isinstance(hz, (int, float)) or not isinstance(duration, (int, float)):
         raise TypeError("Invalid types for play_frequency")
+    app = _require_app()
+    if hasattr(app, "get_project_data"):
+        from core.eel_bridge import jam_player
+        import sounddevice as sd
+        def _play_freq():
+            tone = jam_player.generate_tone(hz, duration, bar_num=None)
+            sd.play(tone, jam_player.sample_rate)
+            sd.wait()
+        threading.Thread(target=_play_freq, daemon=True).start()
+        return
     editor = _require_editor()
     if hasattr(editor, "player"):
         import sounddevice as sd
@@ -209,11 +239,21 @@ def _audio_play_frequency(hz: float, duration: float):
         threading.Thread(target=_play_freq, daemon=True).start()
 
 def _audio_stop_all():
+    app = _require_app()
+    if hasattr(app, "get_project_data"):
+        from core.eel_bridge import score_player, jam_player
+        score_player.stop()
+        jam_player.stop()
+        return
     editor = _require_editor()
     if hasattr(editor, "player"):
         editor.player.stop()
 
 def _audio_is_playing() -> bool:
+    app = _require_app()
+    if hasattr(app, "get_project_data"):
+        from core.eel_bridge import score_player
+        return score_player.is_playing
     editor = _require_editor()
     if hasattr(editor, "player"):
         return getattr(editor.player, "is_playing", False)
@@ -227,6 +267,9 @@ roneat_api_audio.is_playing = _audio_is_playing
 
 # ── SCORE API ─────────────────────────────────────────────────────────────────
 def _score_get_raw_text() -> str:
+    app = _require_app()
+    if hasattr(app, "get_project_data"):
+        return app.get_project_data().get("notes", "")
     editor = _require_editor()
     if hasattr(editor, "notes_box"):
         return editor.notes_box.get("1.0", "end-1c")
@@ -234,6 +277,13 @@ def _score_get_raw_text() -> str:
 
 def _score_replace_text(text: str):
     if not isinstance(text, str): raise TypeError("text must be string")
+    app = _require_app()
+    if hasattr(app, "get_project_data"):
+        project_data = app.get_project_data()
+        project_data["notes"] = text
+        import eel
+        eel.js_load_project_data(project_data, "Plugin Update")
+        return
     editor = _require_editor()
     if hasattr(editor, "notes_box"):
         editor.notes_box.delete("1.0", "end")
@@ -243,6 +293,15 @@ def _score_replace_text(text: str):
 
 def _score_insert_at_cursor(text: str):
     if not isinstance(text, str): raise TypeError("text must be string")
+    app = _require_app()
+    if hasattr(app, "get_project_data"):
+        project_data = app.get_project_data()
+        current = project_data.get("notes", "")
+        sep = " " if current and not current.endswith(" ") else ""
+        project_data["notes"] = current + sep + text
+        import eel
+        eel.js_load_project_data(project_data, "Plugin Update")
+        return
     editor = _require_editor()
     if hasattr(editor, "notes_box"):
         editor.notes_box.insert("insert", text)
@@ -252,6 +311,15 @@ def _score_insert_at_cursor(text: str):
 def _score_add_note(bar_index: int, time: float, duration: float):
     if not isinstance(bar_index, int) or not isinstance(time, (int, float)) or not isinstance(duration, (int, float)):
         raise TypeError("Invalid types for add_note parameters")
+    app = _require_app()
+    if hasattr(app, "get_project_data"):
+        project_data = app.get_project_data()
+        current = project_data.get("notes", "")
+        sep = " " if current and not current.endswith(" ") else ""
+        project_data["notes"] = current + sep + f"B{bar_index} {time:.2f} {duration:.2f}"
+        import eel
+        eel.js_load_project_data(project_data, "Plugin Update")
+        return
     editor = _require_editor()
     if hasattr(editor, "notes_box"):
         current = editor.notes_box.get("end-2c", "end-1c")
@@ -264,12 +332,24 @@ def _score_add_note(bar_index: int, time: float, duration: float):
 def _score_set_tempo(bpm: int):
     if not isinstance(bpm, int): raise TypeError("bpm must be integer")
     if not (20 <= bpm <= 400): raise ValueError("bpm must be between 20 and 400")
+    app = _require_app()
+    if hasattr(app, "get_project_data"):
+        project_data = app.get_project_data()
+        project_data["bpm"] = str(bpm)
+        import eel
+        eel.js_load_project_data(project_data, "Plugin Update")
+        return
     editor = _require_editor()
     if hasattr(editor, "bpm_entry"):
         editor.bpm_entry.delete(0, "end")
         editor.bpm_entry.insert(0, str(bpm))
 
 def _score_get_all_notes() -> list:
+    app = _require_app()
+    if hasattr(app, "get_project_data"):
+        notes_text = app.get_project_data().get("notes", "")
+        from core.parse_score import expand_score
+        return expand_score(notes_text)
     editor = _require_editor()
     if hasattr(editor, 'get_all_notes'):
         try:

@@ -1,0 +1,14 @@
+{
+  "id": "roneat_ek_standard",
+  "name": "Roneat Ek (Standard)",
+  "version": "1.0.0",
+  "author": "Roneat Studio Team",
+  "description": "Standard Roneat Ek (Cambodian bamboo xylophone) instrument plugin with 21 keys",
+  "type": "instrument",
+  "depends_on": ["core"],
+  "entry_point": "main.py",
+  "instrument_range": {
+    "min_note": 1,
+    "max_note": 21
+  }
+}

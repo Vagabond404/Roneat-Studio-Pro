@@ -34,17 +34,17 @@ def _register_fonts():
     if os.path.exists(local):
         try:
             pdfmetrics.registerFont(TTFont('KhmerFont', local))
-            return 'KhmerFont', 'Helvetica'
+            return 'KhmerFont', 'KhmerFont'
         except Exception:
             pass
     if sys.platform == 'win32':
         windir = os.environ.get('WINDIR', 'C:\\Windows')
-        for name in ('LeelawUI.ttf', 'DaunPenh.ttf', 'KhmerUI.ttf', 'Nirmala.ttf'):
+        for name in ('KhmerUI.ttf', 'DaunPenh.ttf', 'Nirmala.ttf', 'LeelawUI.ttf'):
             p = os.path.join(windir, 'Fonts', name)
             if os.path.exists(p):
                 try:
                     pdfmetrics.registerFont(TTFont('KhmerFont', p))
-                    return 'KhmerFont', 'Helvetica'
+                    return 'KhmerFont', 'KhmerFont'
                 except Exception:
                     continue
     return 'Helvetica-Bold', 'Helvetica'
@@ -55,10 +55,66 @@ def _hex_rgb(h):
     return tuple(int(h[i:i+2], 16) / 255.0 for i in (0, 2, 4))
 
 
+def _get_font_path():
+    local = resource_path(os.path.join("assets", "KhmerFont.ttf"))
+    if os.path.exists(local):
+        return local
+    if sys.platform == 'win32':
+        windir = os.environ.get('WINDIR', 'C:\\Windows')
+        for name in ('KhmerUI.ttf', 'DaunPenh.ttf', 'Nirmala.ttf', 'LeelawUI.ttf'):
+            p = os.path.join(windir, 'Fonts', name)
+            if os.path.exists(p):
+                return p
+    return None
+
+
+def _draw_text_via_pil(canvas_obj, text, font_path, font_size, color_rgb, center_x, center_y):
+    from PIL import Image, ImageDraw, ImageFont
+    from reportlab.lib.utils import ImageReader
+    
+    try:
+        if font_path:
+            pil_font = ImageFont.truetype(font_path, int(font_size * 2))  # 2x for high resolution
+        else:
+            pil_font = ImageFont.load_default()
+    except Exception:
+        pil_font = ImageFont.load_default()
+        
+    dummy = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(dummy)
+    try:
+        bbox = draw.textbbox((0, 0), text, font=pil_font)
+        tw = max(1, bbox[2] - bbox[0])
+        th = max(1, bbox[3] - bbox[1])
+    except Exception:
+        tw, th = int(font_size * len(text)), int(font_size)
+        bbox = [0, 0, tw, th]
+    
+    padding = 10
+    img_w = tw + padding * 2
+    img_h = th + padding * 2
+    
+    img = Image.new("RGBA", (img_w, img_h), (0, 0, 0, 0))
+    idraw = ImageDraw.Draw(img)
+    
+    r, g, b = color_rgb
+    color_val = (int(r * 255), int(g * 255), int(b * 255), 255)
+    idraw.text((padding - bbox[0], padding - bbox[1]), text, fill=color_val, font=pil_font)
+    
+    scale = 0.5
+    draw_w = img_w * scale
+    draw_h = img_h * scale
+    
+    x = center_x - draw_w / 2
+    y = center_y - draw_h / 2
+    
+    canvas_obj.drawImage(ImageReader(img), x, y, width=draw_w, height=draw_h, mask='auto')
+
+
 def export_to_pdf(filepath, title, notes_text, measure_mode,
                   show_left_hand, cols=16,
                   accent_hex="#c8a96e", font_size_override=None,
-                  show_cover=False, composer="", show_row_numbers=True):
+                  show_cover=False, composer="", show_row_numbers=True, view_mode="Numeric"):
     """
     Export score to PDF.
 
@@ -82,24 +138,47 @@ def export_to_pdf(filepath, title, notes_text, measure_mode,
 
     # ── Parse notation ────────────────────────────────────────────────────────
     _TOKEN_RE = re.compile(r'^(\d+)(#(\d+))?$')
+    _LEFT_RIGHT_RE = re.compile(r'^\((\d+)\)(\d+)(#(\d+))?$')
     beats = []
+    from core.rendering.translation import translate_note
     for raw in notes_text.replace('\n', ' ').split():
         if raw == '/':
             if beats:
                 beats[-1]['barline'] = True
             continue
+        if raw == '_':
+            beats.append({'text': '_', 'barline': False,
+                          'is_trem': False, 'bar': None, 'repeat': 1, 'is_line_rest': True, 'left_bar': None})
+            continue
         if raw in ('-', '0', 'x'):
             beats.append({'text': '-', 'barline': False,
-                          'is_trem': False, 'bar': None, 'repeat': 1})
+                          'is_trem': False, 'bar': None, 'repeat': 1, 'is_line_rest': False, 'left_bar': None})
             continue
+
+        m_lr = _LEFT_RIGHT_RE.match(raw)
+        if m_lr:
+            left_bar = int(m_lr.group(1))
+            bar    = int(m_lr.group(2))
+            is_t   = bool(m_lr.group(3))
+            repeat = int(m_lr.group(4)) if m_lr.group(4) else 1
+            visual_bar = translate_note(bar, view_mode)
+            label  = f"{visual_bar}~{repeat}" if is_t else visual_bar
+            beats.append({'text': label, 'bar': bar, 'left_bar': left_bar, 'barline': False,
+                          'is_trem': is_t, 'repeat': repeat, 'visual_bar': visual_bar, 'is_line_rest': False})
+            continue
+
         m = _TOKEN_RE.match(raw)
         if m:
             bar    = int(m.group(1))
             is_t   = bool(m.group(2))
             repeat = int(m.group(3)) if m.group(3) else 1
-            label  = f"{bar}~{repeat}" if is_t else str(bar)
-            beats.append({'text': label, 'bar': bar, 'barline': False,
-                          'is_trem': is_t, 'repeat': repeat})
+            visual_bar = translate_note(bar, view_mode)
+            label  = f"{visual_bar}~{repeat}" if is_t else visual_bar
+            beats.append({'text': label, 'bar': bar, 'left_bar': bar + 7, 'barline': False,
+                          'is_trem': is_t, 'repeat': repeat, 'visual_bar': visual_bar, 'is_line_rest': False})
+
+    from core.parse_score import group_beats_into_rows
+    grouped_rows = group_beats_into_rows(beats, cols)
 
     # ── Layout maths ──────────────────────────────────────────────────────────
     c = canvas.Canvas(filepath, pagesize=A4)
@@ -112,8 +191,10 @@ def export_to_pdf(filepath, title, notes_text, measure_mode,
     cell_h    = min(48, max(26, cell_w * 1.15))
     row_gap   = 16
     fs        = font_size_override or min(14, cell_w * 0.42)
+    if view_mode in ["Syllabic", "Letters"]:
+        fs = int(fs * 0.8)
 
-    total_rows  = math.ceil(len(beats) / cols) if beats else 1
+    total_rows  = len(grouped_rows) if grouped_rows else 1
     rows_per_pg = max(1, math.floor((h - 180) / (cell_h + row_gap)))
     num_pages   = max(1, math.ceil(total_rows / rows_per_pg))
 
@@ -130,10 +211,21 @@ def export_to_pdf(filepath, title, notes_text, measure_mode,
         c.setFont(body_font, 9)
         c.drawCentredString(w / 2, h - 80, "— RONEAT EK —")
 
-        c.setFont(title_font, 34)
-        c.setFillColorRGB(ar, ag, ab)
-        c.drawCentredString(w / 2, h / 2 + 50, clean_title)
-        tw = c.stringWidth(clean_title, title_font, 34)
+        # Cover page title and composer drawn via PIL to support Khmer complex text shaping
+        font_path = _get_font_path()
+        _draw_text_via_pil(c, clean_title, font_path, 34, (ar, ag, ab), w / 2, h / 2 + 50)
+        
+        try:
+            if font_path:
+                from PIL import Image, ImageDraw, ImageFont
+                tf = ImageFont.truetype(font_path, 34)
+                bbox = ImageDraw.Draw(Image.new("RGBA", (1, 1))).textbbox((0, 0), clean_title, font=tf)
+                tw = bbox[2] - bbox[0]
+            else:
+                tw = c.stringWidth(clean_title, title_font, 34)
+        except Exception:
+            tw = c.stringWidth(clean_title, title_font, 34)
+            
         c.setStrokeColorRGB(ar, ag, ab)
         c.setLineWidth(1.5)
         c.line(w / 2 - tw / 2, h / 2 + 42, w / 2 + tw / 2, h / 2 + 42)
@@ -141,9 +233,9 @@ def export_to_pdf(filepath, title, notes_text, measure_mode,
         c.setFont(body_font, 14)
         c.setFillColorRGB(0.40, 0.45, 0.54)
         c.drawCentredString(w / 2, h / 2, "Roneat Ek Score")
-        if composer:
-            c.setFont(body_font, 12)
-            c.drawCentredString(w / 2, h / 2 - 28, f"Composed by  {composer}")
+        if composer and composer.strip().lower() != "anonymous":
+            comp_text = f"Composed by  {composer.strip()}"
+            _draw_text_via_pil(c, comp_text, font_path, 12, (0.40, 0.45, 0.54), w / 2, h / 2 - 28)
 
         from datetime import date
         c.setFont(body_font, 10)
@@ -152,16 +244,27 @@ def export_to_pdf(filepath, title, notes_text, measure_mode,
         c.showPage()
 
     # ── Score pages ───────────────────────────────────────────────────────────
-    beat_idx = 0
+    # ── Score pages ───────────────────────────────────────────────────────────
+    row_idx = 0
     row_num  = 1
 
     for page_num in range(num_pages):
         if page_num == 0:
             clean_title = title.strip().lstrip('- ').strip()
-            c.setFont(title_font, 22)
-            c.setFillColorRGB(ar, ag, ab)
-            c.drawCentredString(w / 2, h - 64, clean_title)
-            tw = c.stringWidth(clean_title, title_font, 22)
+            font_path = _get_font_path()
+            _draw_text_via_pil(c, clean_title, font_path, 22, (ar, ag, ab), w / 2, h - 64)
+            
+            try:
+                if font_path:
+                    from PIL import Image, ImageDraw, ImageFont
+                    tf = ImageFont.truetype(font_path, 22)
+                    bbox = ImageDraw.Draw(Image.new("RGBA", (1, 1))).textbbox((0, 0), clean_title, font=tf)
+                    tw = bbox[2] - bbox[0]
+                else:
+                    tw = c.stringWidth(clean_title, title_font, 22)
+            except Exception:
+                tw = c.stringWidth(clean_title, title_font, 22)
+                
             c.setStrokeColorRGB(ar, ag, ab)
             c.setLineWidth(1)
             c.line(w / 2 - tw / 2, h - 72, w / 2 + tw / 2, h - 72)
@@ -173,7 +276,9 @@ def export_to_pdf(filepath, title, notes_text, measure_mode,
             start_y = h - 64
 
         row_i = 0
-        while beat_idx < len(beats) and row_i < rows_per_pg:
+        while row_idx < len(grouped_rows) and row_i < rows_per_pg:
+            row = grouped_rows[row_idx]
+            cells = row['cells']
             cy_top = start_y - row_i * (cell_h + row_gap)
 
             if show_row_numbers:
@@ -185,16 +290,13 @@ def export_to_pdf(filepath, title, notes_text, measure_mode,
             x = margin_x + row_num_w
 
             for col_i in range(cols):
-                if (row_i + col_i) % 2 == 0:
-                    c.setFillColorRGB(0.97, 0.98, 0.99)
-                else:
-                    c.setFillColorRGB(1.0, 1.0, 1.0)
+                c.setFillColorRGB(1.0, 1.0, 1.0)
                 c.setStrokeColorRGB(0.78, 0.82, 0.88)
                 c.setLineWidth(0.5)
                 c.rect(x, cy_top - cell_h, cell_w, cell_h, fill=1, stroke=1)
 
-                if beat_idx < len(beats):
-                    bd     = beats[beat_idx]
+                if col_i < len(cells):
+                    bd     = cells[col_i]
                     txt    = bd['text']
                     cx     = x + cell_w / 2
                     cy_mid = cy_top - cell_h / 2
@@ -211,23 +313,22 @@ def export_to_pdf(filepath, title, notes_text, measure_mode,
                         if show_left_hand:
                             c.setFillColorRGB(ar, ag, ab)
                             c.setFont(body_font, fs * 0.88)
-                            lbl_rh = f"{bar}~{rep}" if is_t else str(bar)
-                            c.drawCentredString(cx, cy_mid + fs * 0.22, lbl_rh)
-                            lh = bar + 7
+                            c.drawCentredString(cx, cy_mid + fs * 0.22, txt)
+                            lh = bd.get('left_bar') or (bar + 7)
                             if lh <= 21:
                                 c.setFillColorRGB(0.15, 0.39, 0.92)
                                 c.setFont(body_font, fs * 0.62)
-                                lbl_lh = f"{lh}~{rep}" if is_t else str(lh)
+                                lh_vbar = translate_note(lh, view_mode)
+                                lbl_lh = f"{lh_vbar}~{rep}" if is_t else lh_vbar
                                 c.drawCentredString(cx, cy_mid - fs * 0.52, lbl_lh)
                         else:
                             c.setFillColorRGB(ar, ag, ab)
                             c.setFont(body_font, fs)
-                            lbl = f"{bar}~{rep}" if is_t else str(bar)
-                            c.drawCentredString(cx, cy_mid - fs / 4, lbl)
+                            c.drawCentredString(cx, cy_mid - fs / 4, txt)
 
                     # Bar line
                     draw_bl = False
-                    if "Manual" not in str(measure_mode):
+                    if "manual" not in str(measure_mode).lower():
                         grp = 4 if "4" in str(measure_mode) else 8
                         if (col_i + 1) % grp == 0 and col_i < cols - 1:
                             draw_bl = True
@@ -238,8 +339,15 @@ def export_to_pdf(filepath, title, notes_text, measure_mode,
                         c.setLineWidth(2.5)
                         c.line(x + cell_w, cy_top, x + cell_w, cy_top - cell_h)
 
-                    beat_idx += 1
                 x += cell_w
+            
+            if row.get('line_below'):
+                c.setStrokeColorRGB(0.0, 0.0, 0.0)
+                c.setLineWidth(1.0)
+                line_y = cy_top - cell_h - row_gap / 2
+                c.line(margin_x + row_num_w, line_y, margin_x + row_num_w + cols * cell_w, line_y)
+
+            row_idx += 1
             row_i  += 1
             row_num += 1
 

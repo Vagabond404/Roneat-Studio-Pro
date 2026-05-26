@@ -152,13 +152,55 @@ class PluginManagerWindow(ctk.CTkToplevel):
                 messagebox.showerror("Error", f"Could not enable {info.name}", parent=self)
             else:
                 switch_widget.configure(text="Active")
+                # Refresh plugin list in this window
+                self._refresh_list()
+                # Trigger full UI refresh if an instrument was enabled
+                if info.manifest.get("type") == "instrument":
+                    if hasattr(self.app, 'refresh_instrument_ui'):
+                        self.app.refresh_instrument_ui()
         else:
+            # Confirm before disabling core plugin
+            if info.id == "core":
+                response = messagebox.askyesno(
+                    "Confirm: Disable Core Plugin?",
+                    "WARNING: The 'core' plugin is critical infrastructure for Roneat Studio.\n\n"
+                    "Disabling it WILL cause the application to malfunction and may prevent "
+                    "all other plugins from working correctly.\n\n"
+                    "Are you absolutely sure you want to disable it?",
+                    parent=self
+                )
+                if not response:
+                    var.set(True)
+                    return
+            
+            # Prevent disabling last instrument plugin
+            if info.manifest.get("type") == "instrument":
+                all_plugins = self.pm.get_installed_plugins()
+                active_instruments = [p for p in all_plugins 
+                                     if p.active and p.manifest.get("type") == "instrument" and p.id != info.id]
+                if len(active_instruments) == 0:
+                    messagebox.showerror(
+                        "Cannot Disable Last Instrument",
+                        f"You cannot disable '{info.name}' because it is the last active instrument plugin.\n\n"
+                        f"Roneat Studio requires at least one instrument plugin to function.\n\n"
+                        f"Please enable another instrument plugin before disabling this one.",
+                        parent=self
+                    )
+                    var.set(True)
+                    return
+            
             success = self.pm.disable_plugin(info.id)
             if not success:
                 var.set(True)
                 messagebox.showerror("Error", f"Could not disable {info.name}", parent=self)
             else:
                 switch_widget.configure(text="Disabled")
+                # Refresh plugin list in this window
+                self._refresh_list()
+                # Trigger full UI refresh if an instrument was disabled
+                if info.manifest.get("type") == "instrument":
+                    if hasattr(self.app, 'refresh_instrument_ui'):
+                        self.app.refresh_instrument_ui()
 
     def _uninstall_plugin(self, plugin_id: str):
         if messagebox.askyesno("Confirm", "Are you sure you want to uninstall this plugin?", parent=self):

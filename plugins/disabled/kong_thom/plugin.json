@@ -1,0 +1,14 @@
+{
+  "id": "kong_thom",
+  "name": "Kong Thom",
+  "version": "1.0.0",
+  "author": "Roneat Studio Team",
+  "description": "Kong Thom (Cambodian circular gong chime) instrument plugin with 16 bossed gongs arranged in a semicircle",
+  "type": "instrument",
+  "depends_on": ["core"],
+  "entry_point": "main.py",
+  "instrument_range": {
+    "min_note": 1,
+    "max_note": 16
+  }
+}

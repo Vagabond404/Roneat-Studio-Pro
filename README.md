@@ -1,107 +1,97 @@
-<div align="center">
-  <img src="assets/logo.png" alt="Roneat Studio Pro Logo" width="200" />
-  
-  <h1>Roneat Studio Pro ᨠ</h1>
-  
-  <p>
-    <b>A professional suite designed for transcribing, editing, and exporting scores for the Roneat (the traditional Cambodian xylophone).</b>
-  </p>
-  <p>
-    It combines modern AI audio analysis with a specialized score editor to bridge the gap between traditional performance and digital notation.
-  </p>
-</div>
+# Roneat Studio Pro
 
-![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
-![License](https://img.shields.io/badge/license-Non--Commercial-red.svg)
+Roneat Studio Pro is an advanced digital audio workstation (DAW), transcription tool, and educational software designed specifically for the Cambodian Roneat Ek (traditional xylophone). It offers unparalleled tools for scoring, playback, audio-to-score transcription, and high-quality PDF/Video export.
+
+## Key Features
+
+- **Interactive 2D Roneat Player**: An immersive visual instrument that lets you click, type, and record musical ideas directly onto the digital instrument.
+- **Audio-to-Score Transcription**: Analyzes rhythm, pitch, and timbre from an audio recording, automatically translating performances into clear, readable sheet music.
+- **Dynamic Visual Feedback**: Instant grid-based score rendering with customizable colors, note fonts, and layout densities.
+- **Robust Plugin Ecosystem**: Extensive Python-based API to write custom plugins that hook into the Roneat Studio lifecycle (saving, opening files, playing notes, rendering the UI layout).
 
 ---
 
-## 📋 Table of Contents
+## What's New in Version 4.1.0
 
-- [✨ Core Features](#-core-features)
-- [🧩 Plugin Extensibility (New!)](#-plugin-extensibility-new)
-- [🎤 What is the Roneat Ek?](#-what-is-the-roneat-ek)
-- [🚀 Requirements & Installation](#-requirements--installation-source-code)
-- [🛠️ Building the Executable](#️-building-the-executable)
-- [📝 License & Contact](#-license--contact)
+### Performance & Startup Optimization
+- **Dramatically faster startup**: `librosa`, `numpy` and `sounddevice` are no longer imported at launch. They are now loaded lazily — only when the user opens the **Audio AI** tab for the first time. Startup time reduced by **~1–3 seconds** depending on the machine.
+- **Lazy audio imports**: `core/audio_analyzer.py` now imports heavy libraries inside each function rather than at module level, so importing the module itself has zero cost.
+- **Splash screen theme sync**: The splash screen now reads the saved theme setting (`Dark`, `Light`, `System`) at startup and renders the matching palette — it will always match the main app appearance.
+- **UI v4.0 Overhaul**: 
+    - **Audio AI**: Redesigned as a modern "Neural Drop Zone" with clean progress animations and better layout.
+    - **Settings**: Complete redesign of Hz tuning and calibration pages for a more professional DAW look.
+- **PDF Export Improvement**: The "Composer" field in the PDF export dialog is now automatically pre-filled with the author's name from the score editor.
 
-## ✨ Core Features
+---
 
-- **🎼 Professional Score Editor**: An interactive 2D editor specifically designed for Roneat notation. Features fluid visualization and real-time playback.
-- **🎤 AI Audio Transcription**: Convert your Roneat recordings directly into digital notation using advanced pitch detection and a custom sound-fingerprinting system.
-- **⚖️ Advanced Calibration**: Fine-tune the AI by recording the unique acoustic "fingerprints" of your specific instrument for near-perfect transcription accuracy.
-- **📹 MP4 Video Export**: Generate high-definition 2D videos of your scores, perfectly synchronized with the audio. Perfect for YouTube or teaching.
-- **📄 PDF Export**: Export high-quality sheet music, ready to be printed and shared.
-- **📂 Project Management**: Save, resume, and manage your work easily with the native `.roneat` project format (Drag & Drop supported).
+## What's New in Version 3.0.0
 
-## 🧩 Plugin Extensibility (New!)
+Version 3.0.0 represents a massive architectural leap in Roneat Studio, fundamentally improving how project files are stored and parsed, while delivering a deeply refined "Premium DAW" aesthetic.
 
-Roneat Studio Pro v2.2.0 now features a powerful, **Fully Isolated (Sandboxed) Third-Party Plugin System** via a dedicated Python API (`roneat_api`)! You can:
-- Mount new buttons, standalone custom windows, and tabs.
-- Instantly modify the application's global theme, colors, or language in real-time.
-- Interact directly with the asynchronous audio synthesizer.
-- Intercept, analyze, and programmatically alter the live musical score.
+### 1. Robust File System Architecture (Save/Load Overhaul)
+Project files (`.roneat` extension) are now compressed ZIP archives containing isolated data layers designed with "Single Source of Truth" methodologies:
+- **`notes.json` (The Source of Truth)**: The entire score is now mathematically mapped into discrete playing events. Each event tracks exact execution times (`time_sec`, `time_str`), velocities, bar/pitch locations, and rest intervals. The plaintext format is dynamically regenerated when launching the app. 
+- **`info.json` (Configuration & Metadata)**: Tracks all project boundaries like the song title, composer, hardware sync logic, and environment state independently. Strict typings (Ints and Floats) guarantee bug-free mathematical operations inside the metronome and renderer.
 
-Full plugin management (Enable/Disable/Reload/Uninstall) occurs directly from the native "Plugins" tab. The system features an automatic crash-protection wrapper that catches your plugin's exceptions and safely disables the script to prevent corrupting the host software.
+### 2. Premium Interface Overhaul
+- **Aesthetic Refinement**: The user interface has been completely modernized into a premium, responsive glassmorphism aesthetic with tailored Gold (`#c8a96e`) layouts.
+- **White Paper PDF Export**: PDF & Preview renders now aggressively force a high-visibility white background to accommodate printing standards. 
+- **Anonymous Author Logic**: Projects with no specified author now beautifully collapse the standard attribution fields on printed sheets.
 
-👉 **Learn how to build your own plugins by reading the [Plugin Development Guide (docs/PLUGIN_DEVELOPMENT.md)](docs/PLUGIN_DEVELOPMENT.md).**
+### 3. Stability and Quality of Life
+- **Preset System Correction**: Fixed a critical bug where UI Presets inadvertently targeted and overwrote the user's score/notes. Presets are now strictly scoped to aesthetic and structural environments (grid setups, accent colors, text sizes).
+- **Default Start Environment**: Roneat Studio Pro now opens with "Happy Birthday" out-of-the-box (BPM: 170, 8-column layout), replacing "Bot Sathukar" as the introductory canvas.
+- **Error Handling Optimization**: The CTkMessageBox conflicts causing crashes on validation failures were permanently resolved.
 
-## 🎹 What is the Roneat Ek?
+---
 
-The **Roneat Ek (រនាតឯក)** is a traditional Cambodian xylophone with 21 bamboo or hardwood bars, tuned to a pentatonic scale. It is one of the central instruments of classical Khmer court music and pin peat ensembles.
+## Prerequisites
 
-Roneat Studio Pro is the first dedicated digital tool built around its unique notation system and sonic characteristics.
+- Python 3.10 or higher
+- Windows OS (Tested and built natively)
+- Included dependencies: `customtkinter`, `reportlab`, `sounddevice`, `numpy`, `jsonschema`
 
-> _Easy to Play, Impossible to Forget._
+## Getting Started
 
-## 🚀 Requirements & Installation (Source Code)
+### 1. Clone the Repository
 
-If you are cloning this repository to build or run the software from source code:
-
-**1. Clone the repository and create a virtual environment (Recommended):**
 ```bash
-git clone https://github.com/Vagabond404/Roneat-Studio-Pro.git
-cd Roneat-Studio-Pro
-python -m venv venv
+git clone https://github.com/your-username/roneat-studio.git
+cd roneat-studio
 ```
 
-**2. Activate the virtual environment:**
-*On Windows:* `.\venv\Scripts\activate`
-*On macOS/Linux:* `source venv/bin/activate`
+### 2. Install Project Dependencies
 
-**3. Install dependencies:**
+Create an isolated virtual environment and install dependencies:
+
 ```bash
+python -m venv venv
+venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-**4. Add FFmpeg (Required):**
-- Download the `ffmpeg.exe` binary for your operating system.
-- Place it directly in the root directory (next to `main.py`).
+### 3. Launch Roneat Studio
 
-**5. Launch the application:**
+Start the main orchestrator window:
+
 ```bash
 python main.py
 ```
 
-## 🛠️ Building the Executable
+## Architecture
 
-To generate a standalone `.exe` file for Windows (the build process will automatically strip unneeded repositories and tools):
+Roneat Studio uses a heavily decoupled architecture:
+- `main_window.py`: The entry point that orchestrates routing, frames, and plugin pipelines. 
+- `core/file_manager.py`: Serialization boundaries validating JSON payloads against constraints to maintain save-state integrity.
+- `ui/views/score_editor.py`: The heart of the program. A massive interactive engine combining text inputs, Roneat rendering, PDF generation triggers, and real-time validation logic.
+- `core/parse_score.py`: Handles complex regex parsing for decoding typing (like `4#3` meaning strike the 4th bar with a 3-hit tremolo roll) into the `notes.json` event models.
 
-1. Install PyInstaller:
-   ```bash
-   pip install pyinstaller
-   ```
-2. Run the included build script:
-   ```bash
-   python build.py
-   ```
-*The compiled Roneat Studio Pro executable will be outputted into the `dist/` folder.*
+## Available Scripts
 
-## 📝 License & Contact
+| Command | Description |
+| ------- | ----------- |
+| `python main.py` | Boot the software to the Main View |
+| `python run_tests.py` | Executes the unit test suite verifying pitch parsing |
 
-This project is governed by a Custom Non-Commercial License. You may modify the code, but you may not use this software or any of its derivatives to generate revenue without explicit authorization. See `LICENSE.txt` for full details.
-
-- **Author**: Ange Labbe
-- **Contact**: contact@angelvisionlabs.com
-- **Copyright**: © 2026 Angel Vision Labs
+---
+**Roneat Studio Pro v3.0.0** — *Elevating traditional notation to pristine digital standards.*

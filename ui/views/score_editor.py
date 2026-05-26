@@ -17,13 +17,20 @@ import math
 import threading
 import json
 import os
+import io
 import time
+from typing import Optional
 
 from core.pdf_exporter  import export_to_pdf
 from core.audio_player  import RoneatPlayer
-from core.file_manager  import load_hz_preset, DATA_DIR
+from core.file_manager  import load_hz_preset, DATA_DIR, load_app_settings
 from core.calibration   import samples_available
-from core.parse_score   import validate_score, expand_score, notes_and_durations
+from core.parse_score   import validate_score, expand_score, notes_and_durations, group_beats_into_rows
+from core.file_format   import RoneatFileManager, RoneatNote, RoneatScore
+from core.rendering.translation import translate_note
+
+from ui.components.step_entry import StepEntryController, RhythmToolbarFrame
+from ui.components.virtual_keyboard import VirtualRoneatKeyboard
 
 PRESETS_FILE = os.path.join(DATA_DIR, "score_presets.json")
 
@@ -111,11 +118,21 @@ class _UndoStack:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ScoreEditor(ctk.CTkFrame):
+
+    def _clr(self, color):
+        """Resolve a (light, dark) color tuple to a single hex string."""
+        if isinstance(color, (list, tuple)):
+            return color[1] if ctk.get_appearance_mode() == "Dark" else color[0]
+        return color
+
     def __init__(self, master, get_project_data_callback):
         super().__init__(master, fg_color="transparent")
         self.get_data          = get_project_data_callback
-        self.player            = RoneatPlayer(load_hz_preset(), mode="adsr")
-        self._jam_player       = RoneatPlayer(load_hz_preset(), mode="adsr")
+        audio_mode = load_app_settings().get("audio_mode", "adsr")
+        self.player            = RoneatPlayer(load_hz_preset(), mode=audio_mode)
+        self._jam_player       = RoneatPlayer(load_hz_preset(), mode=audio_mode)
+        self.player.load_samples()
+        self._jam_player.load_samples()
         self.current_sync_data = None
         self._last_audio_path  = None
         self._last_zip_path    = None
@@ -128,6 +145,12 @@ class ScoreEditor(ctk.CTkFrame):
         self.current_overlay     = None
         self._overlay_backdrop   = None
         self._overlay_backdrop_cv = None
+        self._view_mode_var      = ctk.StringVar(value="Numeric")
+        
+        # ── RoneatScore: New universal file format state ─────────────────────
+        self.current_score: Optional[RoneatScore] = self._create_default_score()
+        self._syncing_text = False  # Prevent feedback loops during text ↔ RoneatScore sync
+        self._prev_mode    = "Numeric"  # Mode the notes_box text is currently encoded in
 
         # ── 2D interactive state ──────────────────────────────────────────────
         self._roneat_mode   = "playback"   # "playback" | "edit" | "jam"
@@ -136,19 +159,24 @@ class ScoreEditor(ctk.CTkFrame):
         self._trem_job      = None
         self._hover_bar     = None
         self._last_play_time = 0.0
+        
+        # ── Plugin manager reference (set by MainWindow after initialization) ─
+        self.plugin_manager = None
 
+        # Premium DAW color palette — dark mode locked
         self.C = {
-            "bg":       ("gray96", "#090a0f"),
-            "panel":    ("gray93", "#0f111a"),
-            "card":     ("white",  "#161a22"),
-            "card2":    ("gray95", "#1c212b"),
-            "border":   ("gray80", "#242933"),
+            "bg":       ("#F2F2F2", "#121212"),
+            "panel":    ("#E8E8E8", "#1E1E1E"),
+            "card":     ("#FFFFFF", "#252525"),
+            "card2":    ("#F0F0F0", "#2A2A2A"),
+            "border":   ("#CCCCCC", "#333333"),
             "accent":   "#D4AF37",
+            "doc_accent": "#c8a96e",
             "accent2":  "#e85d4a",
             "blue":     "#3d8ec9",
             "green":    "#3ab87a",
-            "text":     ("gray10", "gray95"),
-            "text_dim": ("gray45", "#8b949e"),
+            "text":     ("#1A1A1A", "#E0E0E0"),
+            "text_dim": ("#666666", "#888888"),
             "warn":     "#f59e0b",
         }
 
@@ -161,36 +189,345 @@ class ScoreEditor(ctk.CTkFrame):
 
         self.bind("<Configure>", self._request_update)
         self.after(200, self.update_preview)
+    
+    # =========================================================================
+    # RONEAT SCORE STATE MANAGEMENT
+    # =========================================================================
+    
+    def set_plugin_manager(self, plugin_manager) -> None:
+        """Set reference to the PluginManager for accessing instrument metadata.
+        
+        Called by MainWindow after plugin_manager_instance is initialized.
+        
+        Args:
+            plugin_manager: Reference to the PluginManager instance.
+        """
+        self.plugin_manager = plugin_manager
+        self._update_instrument_in_players()
+
+    def _update_instrument_in_players(self) -> None:
+        """Update the active instrument plugin in all audio players.
+        
+        Called when the active instrument changes, ensuring playback uses the
+        correct frequencies and audio settings for the selected instrument.
+        """
+        try:
+            if self.plugin_manager:
+                active_plugin = self._get_active_instrument_plugin()
+                if active_plugin:
+                    # Update both regular and jam players with the active plugin
+                    self.player.instrument_plugin = active_plugin
+                    self._jam_player.instrument_plugin = active_plugin
+                    
+                    # Force plugin frequencies if available
+                    if hasattr(active_plugin, 'get_note_frequencies'):
+                        plugin_freqs = active_plugin.get_note_frequencies()
+                        if plugin_freqs:
+                            self.player.roneat_dict = plugin_freqs
+                            self._jam_player.roneat_dict = plugin_freqs
+                    
+                    # Preload notes into the audio engines
+                    self.player.load_samples()
+                    self._jam_player.load_samples()
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to update instrument in players: {e}")
+
+    def get_active_view_mode(self) -> str:
+        """Returns the active UI rendering view mode."""
+        try:
+            return self._view_mode_var.get()
+        except Exception:
+            return "Numeric"
+
+    def set_active_view_mode(self, mode: str) -> None:
+        """Sets the active UI rendering view mode."""
+        self._view_mode_var.set(mode)
+        self._request_update()
+    
+    def _get_active_note_range(self) -> tuple[int, int]:
+        """Get the note range from the active instrument plugin.
+        
+        Queries the active instrument plugin for its note range. Falls back to
+        (1, 21) if the plugin is not available or does not support the API.
+        
+        Returns:
+            tuple[int, int]: (min_note, max_note) notation range.
+        """
+        try:
+            if self.plugin_manager:
+                plugin_module = self.plugin_manager.get_active_instrument_plugin_module()
+                if plugin_module:
+                    # Try to get the plugin instance and call get_note_range()
+                    if hasattr(plugin_module, 'get_plugin'):
+                        plugin = plugin_module.get_plugin()
+                        if hasattr(plugin, 'get_note_range'):
+                            return plugin.get_note_range()
+        except Exception as e:
+            # Log but don't crash - gracefully fall back
+            import logging
+            logging.warning(f"Failed to get note range from plugin: {e}")
+        
+        # Fallback to Roneat Ek standard range
+        return (1, 21)
+    
+    def _get_note_label(self, note_numeric: int, notation_mode: str = "numeric") -> str:
+        """Get the label for a note from the active instrument plugin.
+        
+        Queries the active instrument plugin for a note label in the specified
+        notation mode. Falls back to numeric representation if unavailable.
+        
+        Args:
+            note_numeric: The numeric note (1-based index).
+            notation_mode: Display mode ("numeric", "solfege", "khmer", etc.).
+            
+        Returns:
+            str: The label for the note.
+        """
+        try:
+            if self.plugin_manager:
+                plugin_module = self.plugin_manager.get_active_instrument_plugin_module()
+                if plugin_module:
+                    if hasattr(plugin_module, 'get_plugin'):
+                        plugin = plugin_module.get_plugin()
+                        if hasattr(plugin, 'get_note_label'):
+                            return plugin.get_note_label(note_numeric, notation_mode)
+        except Exception as e:
+            # Log but don't crash
+            import logging
+            logging.warning(f"Failed to get note label from plugin: {e}")
+        
+        # Fallback to simple numeric representation
+        return str(note_numeric)
+    
+    def _create_default_score(self) -> RoneatScore:
+        """Create a default RoneatScore for a new project.
+        
+        Returns:
+            RoneatScore with default metadata and empty notes list.
+        """
+        return RoneatScore(
+            title="Untitled",
+            author="Anonymous",
+            tempo_bpm=120,
+            time_signature="4/4",
+            notes=[],
+            notation_mode="numeric",
+            theme="dark",
+            software_version="3.0.0"
+        )
+    
+    def _sync_notes_from_text(self) -> None:
+        """Convert notes_box text notation to RoneatScore.notes.
+        
+        Parses the current notation text (e.g., '9 8 7#3 - / 5 6') and
+        populates self.current_score.notes with RoneatNote objects.
+        Falls back gracefully if text is invalid.
+        """
+        if self._syncing_text or not self.current_score:
+            return
+
+        numeric_text = self._get_numeric_score_text()
+        if not numeric_text.strip():
+            self.current_score.notes = []
+            return
+
+        try:
+            errors = validate_score(numeric_text)
+            if errors:
+                return  # Invalid notation, keep existing notes
+
+            # Parse the notation into structured note data
+            events = expand_score(numeric_text)
+            if not events:
+                self.current_score.notes = []
+                return
+            
+            # Convert events to RoneatNote objects
+            notes = []
+            note_id = 1
+            for event in events:
+                if isinstance(event, dict) and "pitch" in event:
+                    notes.append(RoneatNote(
+                        id=note_id,
+                        bar=event.get("bar", 1),
+                        beat=event.get("beat", 1.0),
+                        duration=event.get("duration", 1.0),
+                        pitch_numeric=int(event["pitch"]),
+                        pitch_midi=event.get("midi", 60),  # Default MIDI
+                        velocity=event.get("velocity", 100),
+                        hand=event.get("hand", "right"),
+                        repetition_count=event.get("repeat", 1)
+                    ))
+                    note_id += 1
+            
+            self.current_score.notes = notes
+        except Exception:
+            pass  # Silently ignore parse errors during typing
+    
+    def _update_metadata_from_ui(self) -> None:
+        """Update RoneatScore metadata from current UI values.
+        
+        Reads title from the title_entry widget and applies to current_score.
+        """
+        if not self.current_score:
+            return
+        
+        title = self.title_entry.get().strip()
+        if title:
+            self.current_score.title = title
+        
+        author = self.author_entry.get().strip()
+        if author:
+            self.current_score.author = author
+    
+    def open_roneat_file(self, filepath: str) -> bool:
+        """Load a .roneat file using RoneatFileManager.
+        
+        Args:
+            filepath: Path to .roneat file.
+            
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            self._update_metadata_from_ui()
+            score = RoneatFileManager.load(filepath)
+            self.current_score = score
+            
+            # Update UI to reflect loaded score
+            self._syncing_text = True
+            self.title_entry.delete(0, "end")
+            self.title_entry.insert(0, score.title)
+            
+            if hasattr(self, "author_entry"):
+                self.author_entry.delete(0, "end")
+                self.author_entry.insert(0, score.author)
+                
+            self._syncing_text = False
+            
+            self.update_preview()
+            return True
+        except Exception as e:
+            # Lazy import jsonschema to check for validation errors
+            try:
+                import jsonschema
+                if isinstance(e, jsonschema.ValidationError):
+                    messagebox.showerror(
+                        title="Corrupted File",
+                        message=f"The .roneat file is corrupted or invalid:\n\n{str(e)[:200]}"
+                    )
+                    return False
+            except ImportError:
+                pass
+            
+            # Handle other exception types
+            if isinstance(e, FileNotFoundError):
+                messagebox.showerror(
+                    title="File Not Found",
+                    message="The file could not be found."
+                )
+            else:
+                messagebox.showerror(
+                    title="Error Loading File",
+                    message=f"Error loading .roneat file:\n\n{str(e)[:200]}"
+                )
+            return False
+    
+    def save_roneat_file(self, filepath: str) -> bool:
+        """Save current score to a .roneat file using RoneatFileManager.
+        
+        Args:
+            filepath: Path where .roneat file should be saved.
+            
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            if not self.current_score:
+                messagebox.showwarning(
+                    title="No Score",
+                    message="No score loaded. Create or open a score first."
+                )
+                return False
+            
+            self._update_metadata_from_ui()
+            self._sync_notes_from_text()
+            
+            RoneatFileManager.save(self.current_score, filepath)
+            return True
+        except ValueError as e:
+            messagebox.showwarning(
+                title="Validation Error",
+                message=f"Score validation failed:\n\n{str(e)[:200]}"
+            )
+            return False
+        except Exception as e:
+            messagebox.showerror(
+                title="Error Saving File",
+                message=f"Error saving .roneat file:\n\n{str(e)[:200]}"
+            )
+            return False
+    
+    def set_notation_mode(self, mode: str) -> None:
+        """Change notation display mode (numeric or syllabic).
+        
+        Updates the display_settings but does NOT modify the notes data,
+        ensuring notation-agnostic format compatibility.
+        
+        Args:
+            mode: "numeric" or "syllabic".
+        """
+        if self.current_score and mode in ("numeric", "syllabic"):
+            self.current_score.notation_mode = mode
+            
+            # Update button visual state
+            if hasattr(self, '_notation_btns'):
+                for m, btn in self._notation_btns.items():
+                    if m == mode:
+                        btn.configure(
+                            fg_color=self.C["accent"],
+                            text_color="#0d0d0d"
+                        )
+                    else:
+                        btn.configure(
+                            fg_color="transparent",
+                            text_color=self.C["text_dim"]
+                        )
+            
+            self.update_preview()
 
     # =========================================================================
     # LEFT PANEL
     # =========================================================================
 
     def _build_left_panel(self):
-        left = ctk.CTkFrame(self, fg_color=self.C["panel"], corner_radius=0)
+        left = ctk.CTkFrame(self, fg_color = self.C["panel"], corner_radius=0)
         left.grid(row=0, column=0, sticky="nsew")
-        left.grid_rowconfigure(1, weight=1)
+        left.grid_rowconfigure(2, weight=1)   # scroll area expands
         left.grid_columnconfigure(0, weight=1)
 
+        # ── Header (row 0) ─────────────────────────────────────────────
         hdr = ctk.CTkFrame(left, fg_color="transparent")
-        hdr.grid(row=0, column=0, sticky="ew", padx=28, pady=(28, 0))
+        hdr.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 8))
         ctk.CTkLabel(hdr, text="🎼  Score Editor",
-                     font=ctk.CTkFont(family="Segoe UI", size=26, weight="bold"),
-                     text_color=self.C["accent"]).pack(anchor="w")
+                     font=ctk.CTkFont(family="Segoe UI", size=18, weight="bold"),
+                     text_color = self.C["accent"]).pack(anchor="w")
         ctk.CTkLabel(hdr, text="Edit, preview, play and export your Roneat score",
-                     font=ctk.CTkFont(family="Segoe UI", size=13),
-                     text_color=self.C["text_dim"]).pack(anchor="w", pady=(4, 0))
-        ctk.CTkFrame(left, height=1, fg_color=self.C["border"]).grid(
-            row=0, column=0, sticky="ew", padx=20, pady=(74, 0))
+                     font=ctk.CTkFont(family="Segoe UI", size=11),
+                     text_color = self.C["text_dim"]).pack(anchor="w", pady=(2, 0))
 
+        # ── Separator (row 1) ──────────────────────────────────────
+        ctk.CTkFrame(left, height=1, fg_color = self.C["border"]).grid(
+            row=1, column=0, sticky="ew", padx=16, pady=0)
+
+        # ── Scrollable content (row 2) ─────────────────────────────
         scroll = ctk.CTkScrollableFrame(left, fg_color="transparent",
-                                        scrollbar_button_color=self.C["accent"])
-        scroll.grid(row=1, column=0, sticky="nsew")
+                                        scrollbar_button_color = self.C["accent"])
+        scroll.grid(row=2, column=0, sticky="nsew", pady=(4, 0))
 
         self._build_info_card(scroll)
         self._build_editor_card(scroll)
-        self._build_notation_guide(scroll)
-        self._build_audio_mode_card(scroll)
         self._build_presets_card(scroll)
         self._build_customize_card(scroll)
         self._build_export_card(scroll)
@@ -198,52 +535,71 @@ class ScoreEditor(ctk.CTkFrame):
     def _build_info_card(self, parent):
         card = self._card(parent)
         ctk.CTkLabel(card, text="SONG TITLE",
-                     font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
-                     text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(anchor="w", padx=22, pady=(16, 6))
+                     font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                     text_color = self.C["text_dim"]).pack(anchor="w", padx=16, pady=(14, 4))
         self.title_entry = ctk.CTkEntry(
-            card, height=42, corner_radius=10,
-            border_width=1, border_color=self.C["border"],
+            card, height=38, corner_radius=4,
+            fg_color = self.C["card2"],
+            border_width=1, border_color = self.C["border"],
             placeholder_text="Song title",
-            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"))
-        self.title_entry.insert(0, "Bot Sathukar")
-        self.title_entry.pack(fill="x", padx=22, pady=(0, 20))
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"))
+        self.title_entry.insert(0, "Happy Birthday")
+        self.title_entry.pack(fill="x", padx=16, pady=(0, 6))
         self.title_entry.bind("<KeyRelease>", self._request_update)
+        
+        ctk.CTkLabel(card, text="COMPOSER / AUTHOR",
+                     font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                     text_color = self.C["text_dim"]).pack(anchor="w", padx=16, pady=(4, 4))
+        self.author_entry = ctk.CTkEntry(
+            card, height=34, corner_radius=4,
+            fg_color = self.C["card2"],
+            border_width=1, border_color = self.C["border"],
+            placeholder_text="Author name",
+            font=ctk.CTkFont(family="Segoe UI", size=12))
+        self.author_entry.insert(0, "")
+        self.author_entry.pack(fill="x", padx=16, pady=(0, 16))
+        self.author_entry.bind("<KeyRelease>", self._request_update)
 
     def _build_editor_card(self, parent):
         card = self._card(parent)
 
         hdr_row = ctk.CTkFrame(card, fg_color="transparent")
         hdr_row.pack(fill="x", padx=18, pady=(14, 0))
-        ctk.CTkLabel(hdr_row, text="NOTATION  (e.g. 9 8 7#3 - / 5 6)",
-                     font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
-                     text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(side="left")
+        self.notation_hint_lbl = ctk.CTkLabel(
+            hdr_row, text="NOTATION  (e.g. 9 8 7#3 - / 5 6)",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
+            text_color=self.C["text_dim"])
+        self.notation_hint_lbl.pack(side="left")
         self.copy_notation_btn = ctk.CTkButton(
             hdr_row, text="⧉  Copy", command=self._copy_notation,
             width=70, height=26, corner_radius=6,
-            fg_color="transparent", text_color=self.C["accent"],
-            border_width=1, border_color=self.C["accent"],
-            hover_color=self.C["card"], font=ctk.CTkFont(size=11))
+            fg_color="transparent", text_color = self.C["accent"],
+            border_width=1, border_color = self.C["accent"],
+            hover_color = self.C["card"], font=ctk.CTkFont(size=11))
         self.copy_notation_btn.pack(side="right")
 
         val_row = ctk.CTkFrame(card, fg_color="transparent")
-        val_row.pack(fill="x", padx=18, pady=(2, 0))
+        val_row.pack(fill="x", padx=16, pady=(2, 0))
         self.valid_dot = tk.Canvas(val_row, width=12, height=12,
-                                   highlightthickness=0, bg="#1c2128")
+                                   highlightthickness=0, bg=self._clr(self.C["card"]))
         self.valid_dot.pack(side="left", pady=2)
         self._draw_valid_dot(True)
         self.valid_lbl = ctk.CTkLabel(val_row, text="Score is valid",
                                       font=ctk.CTkFont(family="Courier", size=10),
-                                      text_color=self.C["green"])
+                                      text_color = self.C["green"])
         self.valid_lbl.pack(side="left", padx=(6, 0))
 
         self.notes_box = ctk.CTkTextbox(
-            card, height=155, corner_radius=10,
-            border_width=1, border_color=self.C["border"],
-            font=ctk.CTkFont(family="Consolas", size=16), wrap="word")
+            card, height=150, corner_radius=4,
+            fg_color = self.C["card2"],
+            border_width=1, border_color = self.C["border"],
+            font=ctk.CTkFont(family="Consolas", size=15), wrap="word")
         self.notes_box.insert("0.0",
-            "9 8 6 5 6 4 5 6 9 11 12 9 10 11 12 9 / "
-            "10 9 8 7 8 7 5 4 2 4 5 7 4 5 7 8")
-        self.notes_box.pack(fill="x", padx=18, pady=(4, 0))
+            "10 10 9 10 7 8 /\n"
+            "10 10 9 10 6 7 /\n"
+            "10 10 3 5 7 8 9 /\n"
+            "4 4 5 7 6 7")
+        self.notes_box.pack(fill="x", padx=16, pady=(4, 0))
         self.notes_box.bind("<KeyRelease>", self._on_text_modified)
 
         self._undo = _UndoStack(self.notes_box)
@@ -255,164 +611,88 @@ class ScoreEditor(ctk.CTkFrame):
         inner.bind("<Control-Y>",       self._undo.redo)
         inner.bind("<Control-Shift-Z>", self._undo.redo)
 
-        undo_row = ctk.CTkFrame(card, fg_color="transparent")
-        undo_row.pack(fill="x", padx=18, pady=(4, 0))
-        for txt, cmd in [("↩ Undo", self._undo.undo), ("↪ Redo", self._undo.redo)]:
-            ctk.CTkButton(undo_row, text=txt, command=cmd,
-                          width=72, height=26, corner_radius=6,
-                          fg_color="transparent", text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0],
-                          border_width=1, border_color=self.C["border"],
-                          hover_color=self.C["card2"],
-                          font=ctk.CTkFont(size=11)).pack(side="left", padx=(0, 6))
+        # ── Slim toolbar: Undo/Redo inline, then Play/Stop + BPM/Hits/s ──────
+        toolbar = ctk.CTkFrame(card, fg_color = self.C["card2"], corner_radius=4, height=40)
+        toolbar.pack(fill="x", padx=16, pady=(8, 0))
 
-        pb = ctk.CTkFrame(card, fg_color="transparent")
-        pb.pack(fill="x", padx=18, pady=(10, 0))
-        self.play_btn = ctk.CTkButton(pb, text="▶  Play", command=self.play_audio,
-                                      width=90, height=40, corner_radius=10,
-                                      fg_color=self.C["green"], hover_color="#2d8c5f",
-                                      text_color="#090a0f",
-                                      font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"))
-        self.play_btn.pack(side="left", padx=(0, 8))
-        self.stop_btn = ctk.CTkButton(pb, text="⏹  Stop", command=self.stop_audio,
-                                      width=80, height=40, corner_radius=10,
-                                      fg_color=self.C["accent2"], hover_color="#c0392b",
-                                      text_color="#090a0f",
-                                      font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"))
-        self.stop_btn.pack(side="left", padx=(0, 10))
+        # Undo / Redo
+        for txt, cmd in [("↩", self._undo.undo), ("↪", self._undo.redo)]:
+            ctk.CTkButton(toolbar, text=txt, command=cmd,
+                          width=32, height=30, corner_radius=4,
+                          fg_color="transparent", text_color = self.C["text_dim"],
+                          hover_color = self.C["card"],
+                          font=ctk.CTkFont(size=13)).pack(side="left", padx=(4, 0), pady=5)
 
-        ctk.CTkLabel(pb, text="BPM",
-                     font=ctk.CTkFont(family="Courier", size=11),
-                     text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(side="left", padx=(0, 5))
-        self.bpm_entry = ctk.CTkEntry(pb, width=45, height=36, corner_radius=8,
-                                      border_width=1, border_color=self.C["border"],
-                                      font=ctk.CTkFont(family="Courier", size=13))
-        self.bpm_entry.insert(0, "120")
-        self.bpm_entry.pack(side="left", padx=(0, 10))
+        # Thin divider
+        ctk.CTkFrame(toolbar, width=1, height=22, fg_color = self.C["border"]).pack(
+            side="left", padx=6, pady=9)
 
-        # --- Entrée Hits/s ---
-        ctk.CTkLabel(pb, text="Hits/s",
-                     font=ctk.CTkFont(family="Courier", size=11),
-                     text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(side="left", padx=(0, 5))
-        self.trem_speed_entry = ctk.CTkEntry(pb, width=40, height=36, corner_radius=8,
-                                      border_width=1, border_color=self.C["border"],
-                                      font=ctk.CTkFont(family="Courier", size=13))
-        self.trem_speed_entry.insert(0, "10") # Default set to 10
-        self.trem_speed_entry.pack(side="left", padx=(0, 10))
+        # Play / Stop
+        self.play_btn = ctk.CTkButton(
+            toolbar, text="▶  Play", command=self.play_audio,
+            width=82, height=30, corner_radius=4,
+            fg_color = self.C["green"], hover_color="#2d8c5f",
+            text_color="#0d0d0d",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"))
+        self.play_btn.pack(side="left", padx=(0, 4), pady=5)
 
-        self.metro_canvas = tk.Canvas(pb, width=22, height=22, highlightthickness=0)
-        self.metro_canvas.pack(side="left")
+        self.stop_btn = ctk.CTkButton(
+            toolbar, text="⏹  Stop", command=self.stop_audio,
+            width=76, height=30, corner_radius=4,
+            fg_color=self.C["accent2"], hover_color="#c0392b",
+            text_color="#0d0d0d",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"))
+        self.stop_btn.pack(side="left", padx=(0, 8), pady=5)
+
+        # Thin divider
+        ctk.CTkFrame(toolbar, width=1, height=22, fg_color = self.C["border"]).pack(
+            side="left", padx=(0, 6), pady=9)
+
+        # BPM label + entry
+        ctk.CTkLabel(toolbar, text="BPM",
+                     font=ctk.CTkFont(family="Segoe UI", size=10),
+                     text_color = self.C["text_dim"]).pack(side="left", padx=(0, 4))
+        self.bpm_entry = ctk.CTkEntry(
+            toolbar, width=46, height=28, corner_radius=4,
+            fg_color = self.C["card"],
+            border_width=1, border_color = self.C["border"],
+            font=ctk.CTkFont(family="Courier", size=12))
+        self.bpm_entry.insert(0, "170")
+        self.bpm_entry.pack(side="left", padx=(0, 10), pady=6)
+
+        # Hits/s label + entry
+        ctk.CTkLabel(toolbar, text="Hits/s",
+                     font=ctk.CTkFont(family="Segoe UI", size=10),
+                     text_color = self.C["text_dim"]).pack(side="left", padx=(0, 4))
+        self.trem_speed_entry = ctk.CTkEntry(
+            toolbar, width=40, height=28, corner_radius=4,
+            fg_color = self.C["card"],
+            border_width=1, border_color = self.C["border"],
+            font=ctk.CTkFont(family="Courier", size=12))
+        self.trem_speed_entry.insert(0, "10")
+        self.trem_speed_entry.pack(side="left", padx=(0, 8), pady=6)
+
+        # Metronome dot
+        self.metro_canvas = tk.Canvas(toolbar, width=20, height=20, highlightthickness=0,
+                                      bg=self._clr(self.C["card2"]))
+        self.metro_canvas.pack(side="left", pady=10)
         self._update_metro_canvas(False)
+
         self.sync_lbl = ctk.CTkLabel(card, text="",
                                      font=ctk.CTkFont(family="Courier", size=10),
-                                     text_color=self.C["green"])
-        self.sync_lbl.pack(anchor="w", padx=18, pady=(4, 8))
-
-    def _build_notation_guide(self, parent):
-        card = self._card(parent)
-        hdr = ctk.CTkFrame(card, fg_color="transparent")
-        hdr.pack(fill="x", padx=18, pady=(12, 0))
-        ctk.CTkLabel(hdr, text="NOTATION GUIDE",
-                     font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
-                     text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(side="left")
-        self._guide_visible = False
-        self._guide_toggle_btn = ctk.CTkButton(
-            hdr, text="Show ▾", command=self._toggle_guide,
-            width=70, height=24, corner_radius=6,
-            fg_color="transparent", text_color=self.C["accent"],
-            border_width=1, border_color=self.C["accent"],
-            hover_color=self.C["card2"], font=ctk.CTkFont(size=11))
-        self._guide_toggle_btn.pack(side="right")
-        self._guide_frame = ctk.CTkFrame(card, fg_color="transparent")
-        guide_text = (
-            "  9          →  play bar 9  (1 beat)\n"
-            "  9#6        →  bar 9, tremolo roll EXACTLY 6 times\n"
-            "  -   0   x  →  rest  (1 beat silence)\n"
-            "  /          →  bar line  (visual separator only)\n"
-            "\n"
-            "  Bars :  1 = highest / shortest  ←→  21 = lowest / longest\n"
-            "  Left hand is automatically bar + 7  (when Two Mallets ON)\n"
-            "\n"
-            "  2D Edit mode tips\n"
-            "  Click a bar        →  append its number\n"
-            "  Hold ≥ threshold   →  tremolo (longer = more repeats)\n"
-            "  Right-click        →  insert  /  bar line"
-        )
-        ctk.CTkLabel(self._guide_frame, text=guide_text,
-                     font=ctk.CTkFont(family="Courier", size=11),
-                     text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0],
-                     justify="left", anchor="w").pack(anchor="w", padx=8, pady=(8, 14))
-
-    def _toggle_guide(self):
-        self._guide_visible = not self._guide_visible
-        if self._guide_visible:
-            self._guide_frame.pack(fill="x", padx=4, pady=(4, 0))
-            self._guide_toggle_btn.configure(text="Hide ▴")
-        else:
-            self._guide_frame.pack_forget()
-            self._guide_toggle_btn.configure(text="Show ▾")
-
-    def _build_audio_mode_card(self, parent):
-        card = self._card(parent)
-        ctk.CTkLabel(card, text="AUDIO ENGINE",
-                     font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
-                     text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(anchor="w", padx=18, pady=(14, 6))
-        self._audio_mode_var = ctk.StringVar(value="adsr")
-        row = ctk.CTkFrame(card, fg_color="transparent")
-        row.pack(fill="x", padx=18, pady=(0, 4))
-        self._adsr_radio = ctk.CTkRadioButton(
-            row, text="ADSR Synthesis  (always available)",
-            variable=self._audio_mode_var, value="adsr",
-            command=self._on_audio_mode_change,
-            font=ctk.CTkFont(size=12),
-            fg_color=self.C["accent"], hover_color=self.C["accent"])
-        self._adsr_radio.pack(anchor="w", pady=(0, 6))
-        self._smp_radio = ctk.CTkRadioButton(
-            row, text="Real Samples  (requires calibration)",
-            variable=self._audio_mode_var, value="samples",
-            command=self._on_audio_mode_change,
-            font=ctk.CTkFont(size=12),
-            fg_color=self.C["accent"], hover_color=self.C["accent"])
-        self._smp_radio.pack(anchor="w")
-        self._audio_mode_lbl = ctk.CTkLabel(card, text="",
-                                            font=ctk.CTkFont(family="Courier", size=10),
-                                            text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0])
-        self._audio_mode_lbl.pack(anchor="w", padx=18, pady=(4, 14))
-        self._refresh_audio_mode_ui()
-
-    def _refresh_audio_mode_ui(self):
-        has_smp = samples_available()
-        if has_smp:
-            self._smp_radio.configure(state="normal")
-            self._audio_mode_lbl.configure(
-                text="✅  Real samples loaded from calibration",
-                text_color=self.C["green"])
-        else:
-            self._smp_radio.configure(state="disabled")
-            if self._audio_mode_var.get() == "samples":
-                self._audio_mode_var.set("adsr")
-            self._audio_mode_lbl.configure(
-                text="⚠  No samples yet — run calibration in Settings",
-                text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0])
-
-    def _on_audio_mode_change(self):
-        mode = self._audio_mode_var.get()
-        self.player.mode = mode
-        self._jam_player.mode = mode
-        if mode == "samples" and not self.player._samples_loaded:
-            self.player.load_samples()
-        if mode == "samples" and not self._jam_player._samples_loaded:
-            self._jam_player.load_samples()
+                                     text_color = self.C["green"])
+        self.sync_lbl.pack(anchor="w", padx=16, pady=(4, 8))
 
     def _build_presets_card(self, parent):
         card = self._card(parent)
         ctk.CTkLabel(card, text="PRESETS",
                      font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
-                     text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(anchor="w", padx=18, pady=(14, 6))
+                     text_color = self.C["text_dim"]).pack(anchor="w", padx=18, pady=(14, 6))
         self.preset_combo = ctk.CTkComboBox(
             card, values=self._get_preset_names(),
             command=self._load_preset,
             height=34, corner_radius=8,
-            border_width=1, border_color=self.C["border"],
+            border_width=1, border_color = self.C["border"],
             font=ctk.CTkFont(size=12))
         self.preset_combo.set("Select a preset...")
         self.preset_combo.pack(fill="x", padx=18, pady=(0, 8))
@@ -420,33 +700,33 @@ class ScoreEditor(ctk.CTkFrame):
         btn_row.pack(fill="x", padx=18, pady=(0, 14))
         ctk.CTkButton(btn_row, text="+ Save", command=self._save_preset,
                       height=32, corner_radius=8, width=100,
-                      fg_color=self.C["accent"], text_color="#0d1117",
+                      fg_color = self.C["accent"], text_color="#0d1117",
                       hover_color="#deba7e",
                       font=ctk.CTkFont(size=12, weight="bold")).pack(side="left", padx=(0, 6))
         ctk.CTkButton(btn_row, text="Delete", command=self._delete_preset,
                       height=32, corner_radius=8, width=76,
                       fg_color="transparent", text_color=self.C["accent2"],
                       border_width=1, border_color=self.C["accent2"],
-                      hover_color=self.C["card"],
+                      hover_color = self.C["card"],
                       font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 6))
         ctk.CTkButton(btn_row, text="Import", command=self._import_preset,
                       height=32, corner_radius=8, width=76,
-                      fg_color="transparent", text_color=self.C["text"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text"][0],
-                      border_width=1, border_color=self.C["border"],
-                      hover_color=self.C["card"],
+                      fg_color="transparent", text_color = self.C["text"],
+                      border_width=1, border_color = self.C["border"],
+                      hover_color = self.C["card"],
                       font=ctk.CTkFont(size=12)).pack(side="left")
 
     def _build_customize_card(self, parent):
         card = self._card(parent)
         ctk.CTkLabel(card, text="DISPLAY SETTINGS",
                      font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
-                     text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(anchor="w", padx=18, pady=(14, 6))
+                     text_color = self.C["text_dim"]).pack(anchor="w", padx=18, pady=(14, 6))
         self._row_label(card, "Measure Style")
         self.measure_combo = ctk.CTkComboBox(
             card, values=["4 beats", "8 beats", "Manual (using '/')"],
             command=self._request_update,
             height=32, corner_radius=8,
-            border_width=1, border_color=self.C["border"],
+            border_width=1, border_color = self.C["border"],
             font=ctk.CTkFont(size=12))
         self.measure_combo.set("Manual (using '/')")
         self.measure_combo.pack(fill="x", padx=18, pady=(2, 8))
@@ -456,16 +736,16 @@ class ScoreEditor(ctk.CTkFrame):
                           "16 Columns (Medium)", "20 Columns", "24 Columns (Small)"],
             command=self._request_update,
             height=32, corner_radius=8,
-            border_width=1, border_color=self.C["border"],
+            border_width=1, border_color = self.C["border"],
             font=ctk.CTkFont(size=12))
-        self.grid_combo.set("16 Columns (Medium)")
+        self.grid_combo.set("8 Columns (Large)")
         self.grid_combo.pack(fill="x", padx=18, pady=(2, 8))
         self._row_label(card, "Note Font Size")
         self.font_size_slider = ctk.CTkSlider(
             card, from_=8, to=22, number_of_steps=14,
             command=self._request_update,
-            progress_color=self.C["accent"],
-            button_color=self.C["accent"], height=18)
+            progress_color = self.C["accent"],
+            button_color = self.C["accent"], height=18)
         self.font_size_slider.set(14)
         self.font_size_slider.pack(fill="x", padx=18, pady=(2, 8))
         self._row_label(card, "Accent Color")
@@ -476,46 +756,47 @@ class ScoreEditor(ctk.CTkFrame):
                           fg_color=hex_col, hover_color=hex_col,
                           command=lambda h=hex_col: self._set_accent(h)
                           ).pack(side="left", padx=3)
+        
         self.left_hand_var = ctk.BooleanVar(value=True)
         ctk.CTkSwitch(card, text="Show Left Hand  (+7 bars)",
                       variable=self.left_hand_var, command=self._request_update,
                       font=ctk.CTkFont(size=12),
-                      progress_color=self.C["accent"]).pack(anchor="w", padx=18, pady=(0, 6))
+                      progress_color = self.C["accent"]).pack(anchor="w", padx=18, pady=(0, 6))
         self.show_numbers_var = ctk.BooleanVar(value=True)
         ctk.CTkSwitch(card, text="Show Bar Numbers",
                       variable=self.show_numbers_var, command=self._request_update,
                       font=ctk.CTkFont(size=12),
-                      progress_color=self.C["accent"]).pack(anchor="w", padx=18, pady=(0, 14))
+                      progress_color = self.C["accent"]).pack(anchor="w", padx=18, pady=(0, 14))
 
     def _build_export_card(self, parent):
         card = self._card(parent)
         ctk.CTkLabel(card, text="EXPORT",
                      font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold", slant="italic"),
-                     text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]).pack(anchor="w", padx=18, pady=(14, 8))
+                     text_color = self.C["text_dim"]).pack(anchor="w", padx=18, pady=(14, 8))
         self.export_pdf_btn = ctk.CTkButton(
             card, text="Export to PDF", command=self.export_pdf,
             height=40, corner_radius=10,
-            fg_color=self.C["accent"], text_color="#0d1117",
+            fg_color = self.C["accent"], text_color="#0d1117",
             hover_color="#deba7e",
             font=ctk.CTkFont(size=13, weight="bold"))
         self.export_pdf_btn.pack(fill="x", padx=18, pady=(0, 8))
         self.export_mp4_btn = ctk.CTkButton(
             card, text="Export 2D Video (MP4)", command=self.export_mp4,
             height=40, corner_radius=10,
-            fg_color="transparent", text_color=self.C["accent"],
-            border_width=1, border_color=self.C["accent"],
-            hover_color=self.C["card"],
+            fg_color="transparent", text_color = self.C["accent"],
+            border_width=1, border_color = self.C["accent"],
+            hover_color = self.C["card"],
             font=ctk.CTkFont(size=13))
         self.export_mp4_btn.pack(fill="x", padx=18, pady=(0, 8))
         self.mp4_prog_frame = ctk.CTkFrame(card, fg_color="transparent")
         self.mp4_progress_lbl = ctk.CTkLabel(
             self.mp4_prog_frame, text="",
             font=ctk.CTkFont(family="Courier", size=11),
-            text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0])
+            text_color = self.C["text_dim"])
         self.mp4_progress_lbl.pack(anchor="w", padx=2, pady=(2, 4))
         self.mp4_prog_bar = ctk.CTkProgressBar(
             self.mp4_prog_frame, height=7, corner_radius=4,
-            progress_color=self.C["accent"])
+            progress_color = self.C["accent"])
         self.mp4_prog_bar.set(0)
         self.mp4_prog_bar.pack(fill="x", padx=2, pady=(0, 4))
         ctk.CTkLabel(card, text="", font=ctk.CTkFont(size=4)).pack()
@@ -525,18 +806,18 @@ class ScoreEditor(ctk.CTkFrame):
     # =========================================================================
 
     def _build_right_panel(self):
-        right = ctk.CTkFrame(self, fg_color=self.C["bg"], corner_radius=0)
+        right = ctk.CTkFrame(self, fg_color = self.C["bg"], corner_radius=0)
         right.grid(row=0, column=1, sticky="nsew")
         right.grid_rowconfigure(2, weight=1)
         right.grid_columnconfigure(0, weight=1)
 
         hdr = ctk.CTkFrame(right, fg_color="transparent")
-        hdr.grid(row=0, column=0, sticky="ew", padx=28, pady=(26, 0))
+        hdr.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 0))
         ctk.CTkLabel(hdr, text="Score Preview",
-                     font=ctk.CTkFont(family="Segoe UI", size=22, weight="bold"),
-                     text_color=self.C["accent"]).pack(side="left")
+                     font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+                     text_color = self.C["accent"]).pack(side="left")
 
-        view_frame = ctk.CTkFrame(hdr, fg_color=self.C["card"], corner_radius=10)
+        view_frame = ctk.CTkFrame(hdr, fg_color = self.C["card2"], corner_radius=4)
         view_frame.pack(side="right")
         self._view_btns = {}
         for key, label in [("table", "Table"), ("roneat2d", "2D Roneat")]:
@@ -544,34 +825,53 @@ class ScoreEditor(ctk.CTkFrame):
             btn = ctk.CTkButton(
                 view_frame, text=label,
                 command=lambda k=key: self._switch_view(k),
-                width=100, height=32, corner_radius=8,
-                fg_color=self.C["accent"] if is_active else "transparent",
-                text_color="#0d1117" if is_active else self.C["text"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text"][0],
-                hover_color=self.C["accent"],
-                font=ctk.CTkFont(size=12))
+                width=96, height=28, corner_radius=4,
+                fg_color = self.C["accent"] if is_active else "transparent",
+                text_color="#0d0d0d" if is_active else self.C["text"],
+                hover_color = self.C["accent"],
+                font=ctk.CTkFont(size=11))
             btn.pack(side="left", padx=2, pady=2)
             self._view_btns[key] = btn
 
-        ctk.CTkFrame(right, height=1, fg_color=self.C["border"]).grid(
+        # The Multimodal Segmented Button
+        mode_seg = ctk.CTkSegmentedButton(
+            hdr, values=["Numeric", "Letters", "Syllabic"],
+            variable=self._view_mode_var,
+            command=self._on_mode_changed,
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            selected_color=self.C["accent"],
+            selected_hover_color=self.C["doc_accent"]
+        )
+        mode_seg.pack(side="right", padx=20)
+
+        ctk.CTkFrame(right, height=1, fg_color = self.C["border"]).grid(
             row=1, column=0, sticky="ew", padx=20, pady=(10, 0))
 
-        self._canvas_container = tk.Frame(right, bg="#0d1117")
-        self._canvas_container.grid(row=2, column=0, sticky="nsew", padx=8, pady=(4, 8))
+        self._canvas_container = tk.Frame(right, bg=self._clr(self.C["bg"]))
+        self._canvas_container.grid(row=2, column=0, sticky="nsew", padx=0, pady=(4, 0))
         self._canvas_container.grid_rowconfigure(0, weight=1)
         self._canvas_container.grid_columnconfigure(0, weight=1)
 
         self.vbar = tk.Scrollbar(self._canvas_container, orient="vertical")
         self.vbar.grid(row=0, column=1, sticky="ns")
         self.canvas = tk.Canvas(self._canvas_container, highlightthickness=0,
-                                yscrollcommand=self.vbar.set, bg="#0d1117")
+                                yscrollcommand=self.vbar.set, bg=self._clr(self.C["bg"]))
         self.canvas.grid(row=0, column=0, sticky="nsew")
         self.vbar.config(command=self.canvas.yview)
         self.canvas.bind("<MouseWheel>",
             lambda e: self.canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
-        self.canvas.bind("<Button-4>", lambda e: self.canvas.yview_scroll(-1, "units"))
         self.canvas.bind("<Button-5>", lambda e: self.canvas.yview_scroll(1, "units"))
+        # Click-to-edit: store (beat_index, x0, y0, x1, y1) for each drawn cell
+        self._beat_rects: list[tuple] = []
+        self._active_cell_idx: int | None = None   # which cell is focused for keyboard nav
+        self.canvas.bind("<Button-1>", self._on_canvas_click)
+        # Arrow key navigation (canvas must have focus)
+        self.canvas.bind("<Left>",       lambda e: self._navigate_cell(-1))
+        self.canvas.bind("<Right>",      lambda e: self._navigate_cell(+1))
+        self.canvas.bind("<Tab>",        lambda e: self._navigate_cell(+1))
+        self.canvas.bind("<Shift-Tab>",  lambda e: self._navigate_cell(-1))
 
-        self._roneat2d_frame = ctk.CTkFrame(right, fg_color=self.C["bg"], corner_radius=0)
+        self._roneat2d_frame = ctk.CTkFrame(right, fg_color = self.C["bg"], corner_radius=0)
         self._build_roneat2d_view()
 
     # =========================================================================
@@ -587,16 +887,16 @@ class ScoreEditor(ctk.CTkFrame):
         f.grid_rowconfigure(3, weight=1)   # canvas grows
 
         # ── Row 0 : mode selector bar ─────────────────────────────────────────
-        top = ctk.CTkFrame(f, fg_color=self.C["card"], corner_radius=0)
+        top = ctk.CTkFrame(f, fg_color = self.C["panel"], corner_radius=0)
         top.grid(row=0, column=0, sticky="ew")
         top.grid_columnconfigure(2, weight=1)
 
         ctk.CTkLabel(top, text="MODE",
                      font=ctk.CTkFont(family="Courier", size=10, weight="bold"),
-                     text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0]
+                     text_color = self.C["text_dim"]
                      ).grid(row=0, column=0, padx=(16, 8), pady=8)
 
-        mode_frame = ctk.CTkFrame(top, fg_color=self.C["card2"], corner_radius=8)
+        mode_frame = ctk.CTkFrame(top, fg_color = self.C["card2"], corner_radius=4)
         mode_frame.grid(row=0, column=1, pady=6)
 
         self._mode_btns = {}
@@ -607,79 +907,79 @@ class ScoreEditor(ctk.CTkFrame):
             btn = ctk.CTkButton(
                 mode_frame, text=mlabel,
                 command=lambda m=mk: self._set_roneat_mode(m),
-                width=115, height=30, corner_radius=6,
-                fg_color=self.C["accent"] if is_a else "transparent",
-                text_color="#0d1117" if is_a else self.C["text"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text"][0],
-                hover_color=self.C["accent"],
-                font=ctk.CTkFont(size=12))
+                width=110, height=28, corner_radius=4,
+                fg_color = self.C["accent"] if is_a else "transparent",
+                text_color="#0d0d0d" if is_a else self.C["text"],
+                hover_color = self.C["accent"],
+                font=ctk.CTkFont(size=11))
             btn.pack(side="left", padx=2, pady=2)
             self._mode_btns[mk] = btn
 
         self._mode_hint_lbl = ctk.CTkLabel(
             top, text="Bars light up during playback",
             font=ctk.CTkFont(family="Courier", size=10),
-            text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0])
+            text_color = self.C["text_dim"])
         self._mode_hint_lbl.grid(row=0, column=2, padx=12, pady=8, sticky="w")
 
         # ── Row 1 : settings bar (Edit / Jam) — hidden initially ──────────────
-        self._2d_settings_frame = ctk.CTkFrame(f, fg_color=self.C["panel"],
+        self._2d_settings_frame = ctk.CTkFrame(f, fg_color = self.C["panel"],
                                                corner_radius=0)
         self._2d_settings_frame.grid_columnconfigure(5, weight=1)
 
         ctk.CTkLabel(self._2d_settings_frame, text="Two Mallets",
                      font=ctk.CTkFont(size=11),
-                     text_color=self.C["text"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text"][0]
+                     text_color = self.C["text"]
                      ).grid(row=0, column=0, padx=(16, 4), pady=7)
         self._2d_two_mallet_var = ctk.BooleanVar(value=True)
         ctk.CTkSwitch(self._2d_settings_frame, text="",
                       variable=self._2d_two_mallet_var,
                       width=44, height=22,
-                      progress_color=self.C["accent"]
+                      progress_color = self.C["accent"]
                       ).grid(row=0, column=1, padx=(0, 20), pady=7)
 
         ctk.CTkFrame(self._2d_settings_frame, width=1, height=28,
-                     fg_color=self.C["border"]
+                     fg_color = self.C["border"]
                      ).grid(row=0, column=2, padx=(0, 16), pady=7)
 
         self._trem_lbl = ctk.CTkLabel(self._2d_settings_frame,
                                       text="Tremolo hold time",
                                       font=ctk.CTkFont(size=11),
-                                      text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0])
+                                      text_color = self.C["text_dim"])
         self._trem_lbl.grid(row=0, column=3, padx=(0, 6), pady=7)
         self._trem_slider = ctk.CTkSlider(
             self._2d_settings_frame, from_=0.2, to=1.5,
             number_of_steps=13, width=110,
-            progress_color=self.C["accent"],
-            button_color=self.C["accent"])
+            progress_color = self.C["accent"],
+            button_color = self.C["accent"])
         self._trem_slider.set(0.4)
         self._trem_slider.grid(row=0, column=4, padx=(0, 4), pady=7)
         self._trem_val_lbl = ctk.CTkLabel(self._2d_settings_frame, text="0.4s",
                                           font=ctk.CTkFont(family="Courier", size=10),
-                                          text_color=self.C["accent"])
+                                          text_color = self.C["accent"])
         self._trem_val_lbl.grid(row=0, column=5, padx=(0, 16), pady=7, sticky="w")
         self._trem_slider.configure(command=self._on_trem_edit_slider)
 
         self._2d_feedback_lbl = ctk.CTkLabel(
             self._2d_settings_frame, text="",
             font=ctk.CTkFont(family="Courier", size=11, weight="bold"),
-            text_color=self.C["accent"])
+            text_color = self.C["accent"])
         self._2d_feedback_lbl.grid(row=0, column=6, padx=(0, 16), pady=7, sticky="e")
 
         # ── Row 2 : thin separator ────────────────────────────────────────────
-        self._2d_sep = ctk.CTkFrame(f, height=1, fg_color=self.C["border"])
+        self._2d_sep = ctk.CTkFrame(f, height=1, fg_color = self.C["border"])
         self._2d_sep.grid(row=2, column=0, sticky="ew")
 
         # ── Row 3 : interactive canvas ────────────────────────────────────────
-        self.roneat_canvas = tk.Canvas(f, highlightthickness=0)
-        self.roneat_canvas.grid(row=3, column=0, sticky="nsew")
+        self.roneat_label = ctk.CTkLabel(f, text="")
+        self.roneat_label.grid(row=3, column=0, sticky="nsew")
 
-        self.roneat_canvas.bind("<Configure>",
+        self.roneat_label.bind("<Configure>",
             lambda e: self._draw_roneat2d(self._playing_bar))
-        self.roneat_canvas.bind("<ButtonPress-1>",   self._on_bar_press)
-        self.roneat_canvas.bind("<ButtonRelease-1>", self._on_bar_release)
-        self.roneat_canvas.bind("<ButtonPress-3>",   self._on_bar_right_click)
-        self.roneat_canvas.bind("<Motion>",          self._on_canvas_motion)
-        self.roneat_canvas.bind("<Leave>",           self._on_canvas_leave)
+        self.roneat_label.bind("<ButtonPress-1>",   self._on_bar_press)
+        self.roneat_label.bind("<ButtonRelease-1>", self._on_bar_release)
+        self.roneat_label.bind("<ButtonPress-3>",   self._on_bar_right_click)
+        self.roneat_label.bind("<Motion>",          self._on_canvas_motion)
+        self.roneat_label.bind("<Leave>",           self._on_canvas_leave)
 
     # =========================================================================
     # MODE MANAGEMENT
@@ -694,8 +994,8 @@ class ScoreEditor(ctk.CTkFrame):
         }
         for mk, btn in self._mode_btns.items():
             a = mk == mode
-            btn.configure(fg_color=self.C["accent"] if a else "transparent",
-                          text_color="#0d1117" if a else self.C["text"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text"][0])
+            btn.configure(fg_color = self.C["accent"] if a else "transparent",
+                          text_color="#0d1117" if a else self.C["text"])
         self._mode_hint_lbl.configure(text=hints[mode])
 
         if mode in ("edit", "jam"):
@@ -703,9 +1003,9 @@ class ScoreEditor(ctk.CTkFrame):
             is_edit = mode == "edit"
             self._trem_slider.configure(state="normal" if is_edit else "disabled")
             self._trem_lbl.configure(
-                text_color=self.C["text"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text"][0] if is_edit else self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0])
+                text_color = self.C["text"] if is_edit else self.C["text_dim"])
             self._trem_val_lbl.configure(
-                text_color=self.C["accent"] if is_edit else self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0])
+                text_color = self.C["accent"] if is_edit else self.C["text_dim"])
         else:
             self._2d_settings_frame.grid_remove()
 
@@ -722,8 +1022,8 @@ class ScoreEditor(ctk.CTkFrame):
         self._current_view = key
         for k, btn in self._view_btns.items():
             btn.configure(
-                fg_color=self.C["accent"] if k == key else "transparent",
-                text_color="#0d1117" if k == key else self.C["text"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text"][0])
+                fg_color = self.C["accent"] if k == key else "transparent",
+                text_color="#0d1117" if k == key else self.C["text"])
         if key == "roneat2d":
             self._canvas_container.grid_remove()
             self._roneat2d_frame.grid(row=2, column=0, sticky="nsew")
@@ -741,13 +1041,29 @@ class ScoreEditor(ctk.CTkFrame):
     # =========================================================================
 
     def _bar_geometry(self, W, H):
-        n_bars    = 21
+        """Calculate bar positions for 2D roneat display.
+        
+        Dynamically calculates bar positions based on the active instrument's
+        note range. Bars are arranged horizontally with varying heights.
+        
+        Args:
+            W: Canvas width in pixels.
+            H: Canvas height in pixels.
+            
+        Returns:
+            tuple: (bars, rail_y, rail_h, bar_w) where bars is a list of
+                   (bar_num, xl, xr, yt, yb, cx) tuples for each bar.
+        """
+        # Get dynamic note range from active instrument plugin
+        min_note, max_note = self._get_active_note_range()
+        n_bars = max_note - min_note + 1
+        
         margin_x  = 18
         margin_top = 44
         margin_bot = 32
         bar_gap   = 3
         total_w   = W - margin_x * 2
-        bar_w     = (total_w - bar_gap * (n_bars - 1)) / n_bars
+        bar_w     = (total_w - bar_gap * (n_bars - 1)) / n_bars if n_bars > 0 else total_w
         avail_h   = H - margin_top - margin_bot - 10
         rail_h    = 8
         min_bar_h = avail_h * 0.22
@@ -756,8 +1072,8 @@ class ScoreEditor(ctk.CTkFrame):
 
         bars = []
         for i in range(n_bars):
-            bar_num = 21 - i
-            t       = i / (n_bars - 1)
+            bar_num = max_note - i
+            t       = i / (n_bars - 1) if n_bars > 1 else 0
             bh      = max_bar_h - t * (max_bar_h - min_bar_h)
             xl      = margin_x + i * (bar_w + bar_gap)
             xr      = xl + bar_w
@@ -768,10 +1084,29 @@ class ScoreEditor(ctk.CTkFrame):
         return bars, rail_y, rail_h, bar_w
 
     def _bar_at_xy(self, x, y):
-        W = self.roneat_canvas.winfo_width()
-        H = self.roneat_canvas.winfo_height()
+        """
+        Determine which bar/note is at the given canvas coordinates.
+        
+        For instruments with custom 2D rendering (like Kong Thom), attempts to use
+        the plugin's custom click detection. Falls back to flat grid detection.
+        """
+        W = self.roneat_label.winfo_width()
+        H = self.roneat_label.winfo_height()
         if W < 10 or H < 10:
             return None
+        
+        # Check if active plugin has custom click detection
+        active_plugin = self._get_active_instrument_plugin()
+        if active_plugin and hasattr(active_plugin, 'get_note_at_xy'):
+            try:
+                bar_num = active_plugin.get_note_at_xy(x, y, W, H)
+                if bar_num is not None:
+                    return bar_num
+            except Exception as e:
+                import logging
+                logging.warning(f"Plugin click detection failed: {e}")
+        
+        # Fallback to standard flat grid detection
         bars, _, _, _ = self._bar_geometry(W, H)
         for (bar_num, xl, xr, yt, yb, _cx) in bars:
             if xl <= x <= xr and yt <= y <= yb:
@@ -782,130 +1117,122 @@ class ScoreEditor(ctk.CTkFrame):
     # 2D RONEAT — DRAWING
     # =========================================================================
 
-    def _draw_roneat2d(self, active_bar=None, hover_bar=None,
-                       press_bar=None, trem_repeat=0, active_hand="both"):
-        c = self.roneat_canvas
-        c.update_idletasks()
-        W = c.winfo_width()
-        H = c.winfo_height()
+    def _get_active_instrument_plugin(self):
+        """Get the active instrument plugin instance.
+        
+        Returns the plugin instance if available, or None if not found.
+        """
+        try:
+            if self.plugin_manager:
+                plugin_module = self.plugin_manager.get_active_instrument_plugin_module()
+                if plugin_module and hasattr(plugin_module, 'get_plugin'):
+                    return plugin_module.get_plugin()
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to get active instrument plugin: {e}")
+        return None
+
+    def generate_preview_frame(self, W, H, active_bar, hover_bar, press_bar, trem_repeat, active_hand, active_left_bar=None):
+        from PIL import Image, ImageDraw, ImageFilter, ImageFont
+        from core.rendering.translation import translate_note
+        
+        is_dark = ctk.get_appearance_mode() == "Dark"
+        bg_col = (18, 18, 18) if is_dark else (240, 240, 240)
+        
+        # Base image
+        img = Image.new("RGBA", (W, H), bg_col + (255,))
+        draw = ImageDraw.Draw(img)
+        
+        bars, rail_y, rail_h, bar_w = self._bar_geometry(W, H)
+        min_note, max_note = self._get_active_note_range()
+        mode = self._roneat_mode
+        use_2m = (self._2d_two_mallet_var.get() if mode in ("edit", "jam") else self.left_hand_var.get())
+        
+        # Load font
+        try:
+            font = ImageFont.truetype("consola.ttf", max(8, int(bar_w * 0.4)))
+        except:
+            font = ImageFont.load_default()
+ 
+        # Draw Rail
+        rail_col = (62, 62, 66) if is_dark else (166, 124, 82)
+        if bars:
+            draw.rectangle([bars[0][1] - 6, rail_y, bars[-1][2] + 6, rail_y + rail_h], fill=rail_col)
+ 
+        # Draw Notes
+        bar_face = (42, 45, 46) if is_dark else (210, 180, 140)
+        bar_edge = (21, 23, 24) if is_dark else (139, 69, 19)
+ 
+        accent_hex = self.C["accent"]
+        # Convert hex to RGB
+        accent_rgb = tuple(int(accent_hex.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+ 
+        for (bar_num, xl, xr, yt, yb, cx) in bars:
+            is_rh = active_bar is not None and bar_num == active_bar and active_hand in ("both", "right")
+            lh_target = active_left_bar if active_left_bar is not None else (active_bar + 7 if active_bar else None)
+            is_lh = lh_target is not None and use_2m and bar_num == lh_target and bar_num <= max_note and active_hand in ("both", "left")
+            is_press = press_bar is not None and bar_num == press_bar
+            is_press_lh = press_bar is not None and use_2m and bar_num == press_bar + 7 and bar_num <= max_note
+            is_hov = hover_bar is not None and bar_num == hover_bar and not (is_rh or is_press)
+            is_hov_lh = hover_bar is not None and use_2m and bar_num == hover_bar + 7 and bar_num <= max_note and not (is_lh or is_press_lh)
+ 
+            fc = bar_face
+            sc = bar_edge
+ 
+            if is_rh or is_press:
+                fc = accent_rgb
+            elif is_lh or is_press_lh:
+                fc = (28, 78, 128) if is_dark else (255, 179, 0)
+            elif is_hov:
+                fc = (212, 175, 55)
+            elif is_hov_lh:
+                fc = (184, 134, 11)
+ 
+            # Base shadow/edge
+            draw.rounded_rectangle([xl, yt, xr, yb], radius=2, fill=bar_edge)
+            # Inner face
+            draw.rounded_rectangle([xl + 1, yt, xr - 1, yb - 2], radius=2, fill=fc)
+ 
+            # Draw string (playhead representation)
+            i_idx = max_note - bar_num
+            tube_r = max(3, min(bar_w * 0.36, 10))
+            tube_cy = yb + tube_r + 5 + (tube_r * 0.5 if i_idx % 2 == 0 else 0)
+            
+            draw.line([(cx, yb), (cx, tube_cy - tube_r)], fill=(68, 68, 68), width=1)
+            
+            # Strike point / Playhead (Neon ring effect)
+            tc = fc if (is_rh or is_press or is_lh or is_press_lh) else ((37, 37, 38) if is_dark else (245, 245, 245))
+            draw.ellipse([cx - tube_r, tube_cy - tube_r, cx + tube_r, tube_cy + tube_r], fill=tc)
+            
+            # Draw Text
+            view_lbl = translate_note(bar_num, self.get_active_view_mode())
+            lbl_y = tube_cy + tube_r + 5
+            lbl_c = accent_rgb
+            # center text
+            bbox = draw.textbbox((0,0), view_lbl, font=font)
+            tw = bbox[2] - bbox[0]
+            draw.text((cx - tw/2, lbl_y), view_lbl, fill=lbl_c, font=font)
+ 
+        return img
+
+    def _draw_roneat2d(self, active_bar=None, hover_bar=None, press_bar=None, trem_repeat=0, active_hand="both", active_left_bar=None):
+        import customtkinter as ctk
+        
+        lbl = getattr(self, 'roneat_label', None)
+        if not lbl:
+            return
+            
+        lbl.update_idletasks()
+        W = lbl.winfo_width()
+        H = lbl.winfo_height()
         if W < 50 or H < 50:
             return
-        c.delete("all")
-
-        is_dark = ctk.get_appearance_mode() == "Dark"
-        bg_col  = "#0d1117" if is_dark else "#f0f4f8"
-        c.configure(bg=bg_col)
-
-        bars, rail_y, rail_h, bar_w = self._bar_geometry(W, H)
-
-        rail_col  = "#5a6a7e" if is_dark else "#8fa0b0"
-        bar_face  = "#4a6080" if is_dark else "#b8ccd8"
-        bar_strip = "#3a4f68" if is_dark else "#a0b4c8"
-        bar_edge  = "#2a3848" if is_dark else "#8090a4"
-        tube_in   = "#2a3a50" if is_dark else "#c0ccd8"
-        lbl_in    = "#5a7090" if is_dark else "#6080a0"
-        hover_col = "#6a8aaa" if is_dark else "#90b0c8"
-
-        mode   = self._roneat_mode
-        use_2m = (self._2d_two_mallet_var.get()
-                  if mode in ("edit", "jam") else self.left_hand_var.get())
-
-        c.create_rectangle(bars[0][1] - 6, rail_y,
-                            bars[-1][2] + 6, rail_y + rail_h,
-                            fill=rail_col, outline="")
-
-        for (bar_num, xl, xr, yt, yb, cx) in bars:
-
-            is_rh = active_bar is not None and bar_num == active_bar and active_hand in ("both", "right")
-            is_lh = active_bar is not None and use_2m and bar_num == active_bar + 7 and bar_num <= 21 and active_hand in ("both", "left")
-
-            is_press    = press_bar is not None and bar_num == press_bar
-            is_press_lh = press_bar is not None and use_2m and bar_num == press_bar + 7 and bar_num <= 21
-
-            is_hov      = hover_bar is not None and bar_num == hover_bar and not (is_rh or is_press)
-            is_hov_lh   = hover_bar is not None and use_2m and bar_num == hover_bar + 7 and bar_num <= 21 and not (is_lh or is_press_lh)
-
-            if is_rh or is_press:
-                c.create_rectangle(xl - 3, yt - 3, xr + 3, yb + 6,
-                                   fill="#ffdf90", outline="")
-            elif is_lh or is_press_lh:
-                c.create_rectangle(xl - 3, yt - 3, xr + 3, yb + 6,
-                                   fill="#80b8f8", outline="")
-            elif is_hov:
-                c.create_rectangle(xl - 2, yt - 2, xr + 2, yb + 4,
-                                   fill="#3a5060", outline="")
-            elif is_hov_lh:
-                c.create_rectangle(xl - 2, yt - 2, xr + 2, yb + 4,
-                                   fill="#1e3a55", outline="")
-
-            if is_rh:
-                fc, sc = self.C["accent"], "#a07828"
-            elif is_press:
-                fc, sc = "#e0c080", "#b09040"
-            elif is_lh or is_press_lh:
-                fc, sc = self.C["blue"], "#2060a0"
-            elif is_hov:
-                fc, sc = hover_col, "#4a7090"
-            elif is_hov_lh:
-                fc, sc = "#3060a0", "#204070"
-            else:
-                fc, sc = bar_face, bar_strip
-
-            sw = max(2, bar_w * 0.22)
-            c.create_rectangle(xl, yt, xr, yb, fill=bar_edge, outline="")
-            c.create_rectangle(xl + 1, yt, xr - 1, yb - 1, fill=fc, outline="")
-            c.create_rectangle(xl + 1, yt, xl + sw, yb - 1, fill=sc, outline="")
-
-            i_idx   = 21 - bar_num
-            tube_r  = max(3, min(bar_w * 0.36, 10))
-            tube_cy = yb + tube_r + 5 + (tube_r * 0.5 if i_idx % 2 == 0 else 0)
-            cord_c  = "#445566" if is_dark else "#8898a8"
-            c.create_line(cx, yb, cx, tube_cy - tube_r, fill=cord_c, width=1)
-            tc = (self.C["accent"] if (is_rh or is_press) else self.C["blue"] if (is_lh or is_press_lh) else tube_in)
-            c.create_oval(cx - tube_r, tube_cy - tube_r,
-                          cx + tube_r, tube_cy + tube_r, fill=tc, outline="")
-
-            lbl_y  = tube_cy + tube_r + 5
-            lbl_c  = (self.C["accent"] if (is_rh or is_press) else self.C["blue"] if (is_lh or is_press_lh) else lbl_in)
-            lbl_sz = max(6, min(int(bar_w * 0.52), 11))
-            c.create_text(cx, lbl_y, text=str(bar_num),
-                          font=("Courier", lbl_sz, "bold"), fill=lbl_c)
-
-        if mode == "edit":
-            if press_bar and trem_repeat > 0:
-                status = f"Bar {press_bar}  →  tremolo ×{trem_repeat}  (release to insert)"
-                s_col  = self.C["warn"]
-            elif press_bar:
-                status = f"Bar {press_bar}  —  hold longer for tremolo…"
-                s_col  = self.C["accent"]
-            elif hover_bar:
-                lh_n   = hover_bar + 7
-                status = (f"Bar {hover_bar}  |  Left hand: {lh_n}"
-                          if use_2m and lh_n <= 21 else f"Bar {hover_bar}")
-                s_col  = self.C["text_dim"][1] if is_dark else self.C["text_dim"][0]
-            else:
-                status = "Click a bar to write it  |  Right-click to insert  /"
-                s_col  = "#4a5568"
-        elif mode == "jam":
-            if hover_bar:
-                lh_n   = hover_bar + 7
-                status = (f"Bar {hover_bar}  |  Left hand: {lh_n}"
-                          if use_2m and lh_n <= 21 else f"Bar {hover_bar}")
-                s_col  = self.C["text_dim"][1] if is_dark else self.C["text_dim"][0]
-            else:
-                status = "Click any bar to play it instantly"
-                s_col  = "#4a5568"
-        elif active_bar and 1 <= active_bar <= 21:
-            lh_n   = active_bar + 7
-            status = (f"Right: {active_bar}   Left: {lh_n}"
-                      if use_2m and lh_n <= 21 else f"Bar {active_bar}")
-            s_col  = self.C["accent"]
-        else:
-            status = "No note playing"
-            s_col  = "#4a5568" if is_dark else "#8090a0"
-
-        c.create_text(W / 2, rail_y / 2, text=status,
-                      font=("Georgia", 12, "bold"), fill=s_col)
+            
+        pil_img = self.generate_preview_frame(W, H, active_bar, hover_bar, press_bar, trem_repeat, active_hand, active_left_bar)
+        ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(W, H))
+        
+        lbl.configure(image=ctk_img, text="")
+        lbl.image = ctk_img  # Prevent garbage collection
 
     # =========================================================================
     # 2D RONEAT — MOUSE INTERACTION
@@ -947,6 +1274,12 @@ class ScoreEditor(ctk.CTkFrame):
         bar = self._bar_at_xy(event.x, event.y)
         if bar is None:
             return
+        
+        # Validate bar number against active instrument range
+        min_note, max_note = self._get_active_note_range()
+        if not (min_note <= bar <= max_note):
+            return
+        
         self._press_bar  = bar
         self._press_time = time.time()
 
@@ -1018,11 +1351,30 @@ class ScoreEditor(ctk.CTkFrame):
         self._2d_feedback_lbl.configure(text="Inserted  /  bar line")
         self.after(1000, lambda: self._2d_feedback_lbl.configure(text=""))
 
-    def _edit_append_token(self, token):
+    def _edit_append_token(self, token: str):
+        """
+        Append *token* to notes_box in the current display mode.
+
+        *token* is always a raw numeric string (e.g. "9", "9#3", "-", "/").
+        If the active mode is Letters or Syllabic the numeric part is
+        translated before appending so the textbox stays in the display mode.
+        """
         try:
+            import re
+            from core.rendering.translation import NotationTranslator
+
+            mode = self.get_active_view_mode()
+            display_token = token
+            if mode != "Numeric" and token not in ('/', '-', '0', 'x'):
+                _NRE = re.compile(r'^(\d+)(#(\d+))?$')
+                m = _NRE.match(token)
+                if m:
+                    label = NotationTranslator.index_to_string(int(m.group(1)), mode)
+                    display_token = f"{label}#{m.group(3)}" if m.group(2) else label
+
             current = self.notes_box.get("0.0", "end-1c").rstrip()
             sep = " " if current else ""
-            self.notes_box.insert("end", sep + token)
+            self.notes_box.insert("end", sep + display_token)
             self.notes_box.see("end")
 
             if self._undo:
@@ -1032,22 +1384,40 @@ class ScoreEditor(ctk.CTkFrame):
             print(f"[_edit_append_token error] {e}")
 
     def _play_interactive_note(self, bar):
+        """Play a note interactively in Jam mode.
+        
+        Uses the active instrument plugin's frequencies and audio samples if available.
+        Falls back to default Roneat Ek frequencies if no plugin is active.
+        """
         now = time.time()
         if now - self._last_play_time < 0.05:
             return
         self._last_play_time = now
 
+        # Validate bar number against active instrument range
+        min_note, max_note = self._get_active_note_range()
+        if not (min_note <= bar <= max_note):
+            return
+
         use_2m = self._2d_two_mallet_var.get()
 
         def _play():
             try:
-                import sounddevice as sd
                 jp = self._jam_player
-                jp.roneat_dict = load_hz_preset()
-                tone = jp._build_single_note(bar, 0.8, use_2m)
-                sd.play(tone, jp.sample_rate)
+                if jp.mode == "samples":
+                    # Real samples: C++ backend plays pre-loaded audio, zero latency
+                    jp.audio_core.trigger_note(bar)
+                    if use_2m:
+                        lh_idx = bar + 7
+                        if lh_idx <= 21:
+                            jp.audio_core.trigger_note(lh_idx)
+                else:
+                    # ADSR synthesis: compute waveform in Python and send to C++ mixer
+                    tone = jp._build_single_note(bar_idx=bar, left_bar_idx=min(bar + 7, 21), duration=0.8, two_mallets=use_2m)
+                    jp.audio_core.play_buffer(tone)
             except Exception as e:
-                print(f"[Interactive play] {e}")
+                import logging
+                logging.warning(f"[Interactive play] Error: {e}")
 
         threading.Thread(target=_play, daemon=True).start()
 
@@ -1061,7 +1431,7 @@ class ScoreEditor(ctk.CTkFrame):
         try:
             self.metro_canvas.configure(bg=bg)
             self.metro_canvas.delete("all")
-            col = self.C["accent"] if beat_on else ("#30363d" if is_dark else "#cbd5e1")
+            col = self._clr(self.C["accent"]) if beat_on else ("#30363d" if is_dark else "#cbd5e1")
             self.metro_canvas.create_oval(2, 2, 20, 20, fill=col, outline="")
         except Exception:
             pass
@@ -1106,16 +1476,16 @@ class ScoreEditor(ctk.CTkFrame):
             pass
 
     def _run_validation(self):
-        text   = self.notes_box.get("0.0", "end").strip()
-        errors = validate_score(text)
+        numeric_text = self._get_numeric_score_text()
+        errors = validate_score(numeric_text)
         ok     = len(errors) == 0
         self._draw_valid_dot(ok)
         if ok:
-            events = expand_score(text)
+            events = expand_score(numeric_text)
             n = sum(1 for e in events if e['bar'] is not None)
             self.valid_lbl.configure(
                 text=f"Valid  —  {n} note{'s' if n != 1 else ''}",
-                text_color=self.C["green"])
+                text_color = self.C["green"])
         else:
             msg = errors[0] if len(errors) == 1 else f"{len(errors)} errors  —  {errors[0]}"
             self.valid_lbl.configure(text=msg[:60], text_color=self.C["accent2"])
@@ -1125,27 +1495,184 @@ class ScoreEditor(ctk.CTkFrame):
     # =========================================================================
 
     def _card(self, parent):
-        c = ctk.CTkFrame(parent, fg_color=self.C["card"], corner_radius=12,
-                         border_width=1, border_color=self.C["border"])
-        c.pack(fill="x", padx=20, pady=(0, 14))
+        c = ctk.CTkFrame(parent, fg_color = self.C["card"], corner_radius=4,
+                         border_width=1, border_color = self.C["border"])
+        c.pack(fill="x", padx=16, pady=(0, 12))
         return c
 
     def _row_label(self, parent, text):
         ctk.CTkLabel(parent, text=text,
-                     font=ctk.CTkFont(size=12),
-                     text_color=self.C["text"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text"][0]).pack(anchor="w", padx=18)
+                     font=ctk.CTkFont(family="Segoe UI", size=10),
+                     text_color = self.C["text_dim"]).pack(anchor="w", padx=16)
 
     def _set_accent(self, hex_col):
-        self.C["accent"] = hex_col
+        if hex_col.lower() == "#c8a96e":
+            self.C["accent"] = "#D4AF37"
+            self.C["doc_accent"] = "#c8a96e"
+        else:
+            self.C["accent"] = hex_col
+            self.C["doc_accent"] = hex_col
         self._request_update()
 
     def _on_text_modified(self, event=None):
+        self._sync_notes_from_text()  # Sync notation text to RoneatScore.notes
         self._request_update()
         self._run_validation()
         if self.current_sync_data:
             self.current_sync_data = None
             self.bpm_entry.configure(state="normal")
             self.sync_lbl.configure(text="")
+
+    def _on_mode_changed(self, _=None) -> None:
+        """
+        Called by CTkSegmentedButton AFTER _view_mode_var has been updated.
+
+        We must decode notes_box using _prev_mode (the mode the text is currently
+        encoded in), translate to numeric, then re-encode in the new mode.
+        """
+        new_mode  = self.get_active_view_mode()   # already updated by CTk
+        prev_mode = self._prev_mode               # mode the box is currently in
+
+        if new_mode == prev_mode:
+            return   # nothing to do
+
+        # 1. Decode from the old encoding → pure numeric
+        numeric_text = self._get_numeric_score_text(mode=prev_mode)
+
+        # 2. Encode into the new display format
+        new_text = self._numeric_to_mode(numeric_text, new_mode)
+
+        # 3. Rewrite notes_box (suppress _on_text_modified feedback loop)
+        self._syncing_text = True
+        try:
+            self.notes_box.delete("0.0", "end")
+            self.notes_box.insert("0.0", new_text)
+        finally:
+            self._syncing_text = False
+
+        # 4. Record that the box is now in new_mode
+        self._prev_mode = new_mode
+
+        # 5. Update the NOTATION hint label
+        examples = {
+            "Numeric":  "e.g. 9 8 7#3 - / 5 6",
+            "Letters":  "e.g. A2 G2 F1#3 - / D1 E1",
+            "Syllabic": "e.g. La2 Sol2 Fa1#3 - / Re1 Mi1",
+        }
+        if hasattr(self, "notation_hint_lbl"):
+            self.notation_hint_lbl.configure(
+                text=f"NOTATION  ({examples.get(new_mode, 'e.g. 9 8 7#3 - / 5 6')})")
+
+        self._run_validation()
+        self._request_update()
+
+    # ── Notation normalisation helpers ────────────────────────────────────────
+
+    def _get_numeric_score_text(self, mode: str | None = None) -> str:
+        """
+        Read notes_box and return a **pure numeric** notation string.
+
+        Parameters
+        ----------
+        mode : str | None
+            The notation mode that the notes_box is **currently encoded in**.
+            Defaults to ``self._prev_mode`` (what was last written to the box).
+            Pass this explicitly when calling from within _on_mode_changed,
+            because _view_mode_var may already have been updated to the new mode.
+        """
+        import re
+        from core.rendering.translation import NotationTranslator
+
+        # Use the mode the box is actually encoded in (not the new/target mode)
+        decode_mode = mode if mode is not None else self._prev_mode
+
+        if decode_mode == "Numeric":
+            return self.notes_box.get("0.0", "end-1c")
+
+        _NUM_RE = re.compile(r'^(\d+)(#(\d+))?$')
+        _LEFT_RIGHT_NUM_RE = re.compile(r'^\((\d+)\)(\d+)(#(\d+))?$')
+        out_tokens: list[str] = []
+        raw = self.notes_box.get("0.0", "end-1c").replace('\n', ' ')
+        for tok in raw.split():
+            if tok in ('/', '-', '0', 'x', '_'):
+                out_tokens.append(tok)
+                continue
+            
+            # Already numeric?
+            nm_lr = _LEFT_RIGHT_NUM_RE.match(tok)
+            if nm_lr:
+                out_tokens.append(tok)
+                continue
+            nm = _NUM_RE.match(tok)
+            if nm:
+                out_tokens.append(tok)
+                continue
+
+            # Check if left-right display mode format e.g. "(Sol1)Do2#3"
+            m_lr = re.match(r'^\((.+?)\)(.+?)(#(\d+))?$', tok)
+            if m_lr:
+                left_part = m_lr.group(1)
+                right_part = m_lr.group(2)
+                left_idx = NotationTranslator.string_to_index(left_part, decode_mode)
+                right_idx = NotationTranslator.string_to_index(right_part, decode_mode)
+                if left_idx is not None and right_idx is not None:
+                    if m_lr.group(3):
+                        out_tokens.append(f"({left_idx}){right_idx}#{m_lr.group(4)}")
+                    else:
+                        out_tokens.append(f"({left_idx}){right_idx}")
+                else:
+                    out_tokens.append('-')
+                continue
+
+            # Single note display-mode token, possibly with #N tremolo suffix
+            trem = re.match(r'^(.+?)#(\d+)$', tok)
+            note_part = trem.group(1) if trem else tok
+            idx = NotationTranslator.string_to_index(note_part, decode_mode)
+            if idx is None:
+                out_tokens.append('-')   # unrecognised → rest
+            else:
+                out_tokens.append(f"{idx}#{trem.group(2)}" if trem else str(idx))
+        return ' '.join(out_tokens)
+
+    @staticmethod
+    def _numeric_to_mode(numeric_text: str, mode: str) -> str:
+        """
+        Translate a pure-numeric notation string into *mode*'s display format.
+        Preserves '/', '-', '0', 'x', '_' and tremolo '#N' suffixes.
+        """
+        import re
+        from core.rendering.translation import NotationTranslator
+
+        if mode == "Numeric":
+            return numeric_text
+
+        _NUM_RE = re.compile(r'^(\d+)(#(\d+))?$')
+        _LEFT_RIGHT_NUM_RE = re.compile(r'^\((\d+)\)(\d+)(#(\d+))?$')
+        out: list[str] = []
+        for tok in numeric_text.replace('\n', ' ').split():
+            if tok in ('/', '-', '0', 'x', '_'):
+                out.append(tok)
+                continue
+            
+            m_lr = _LEFT_RIGHT_NUM_RE.match(tok)
+            if m_lr:
+                left_val = int(m_lr.group(1))
+                right_val = int(m_lr.group(2))
+                left_label = NotationTranslator.index_to_string(left_val, mode)
+                right_label = NotationTranslator.index_to_string(right_val, mode)
+                if m_lr.group(3):
+                    out.append(f"({left_label}){right_label}#{m_lr.group(4)}")
+                else:
+                    out.append(f"({left_label}){right_label}")
+                continue
+
+            m = _NUM_RE.match(tok)
+            if m:
+                label = NotationTranslator.index_to_string(int(m.group(1)), mode)
+                out.append(f"{label}#{m.group(3)}" if m.group(2) else label)
+            else:
+                out.append(tok)   # passthrough (already non-numeric?)
+        return ' '.join(out)
 
     def _request_update(self, event=None):
         if self._preview_job:
@@ -1174,8 +1701,6 @@ class ScoreEditor(ctk.CTkFrame):
             return
         p = load_score_presets()
         p[name] = {
-            "title":      self.title_entry.get(),
-            "notes":      self.notes_box.get("0.0", "end").strip(),
             "measure":    self.measure_combo.get(),
             "grid":       self.grid_combo.get(),
             "left_hand":  self.left_hand_var.get(),
@@ -1195,10 +1720,6 @@ class ScoreEditor(ctk.CTkFrame):
         if name not in p:
             return
         d = p[name]
-        self.title_entry.delete(0, "end")
-        self.title_entry.insert(0, d.get("title", ""))
-        self.notes_box.delete("0.0", "end")
-        self.notes_box.insert("0.0", d.get("notes", ""))
         self.measure_combo.set(d.get("measure", "Manual (using '/')"))
         self.grid_combo.set(d.get("grid", "16 Columns (Medium)"))
         self.left_hand_var.set(d.get("left_hand", True))
@@ -1254,10 +1775,16 @@ class ScoreEditor(ctk.CTkFrame):
         if self.player.is_playing:
             self.player.stop()
 
+        # Update instrument in player before playing
+        self._update_instrument_in_players()
+        
         self.player.roneat_dict = load_hz_preset()
-        score       = self.notes_box.get("0.0", "end")
+        score       = self._get_numeric_score_text()
         bpm_raw     = self.bpm_entry.get().strip()
-        bpm         = int(bpm_raw) if bpm_raw.isdigit() and 20 <= int(bpm_raw) <= 400 else 120
+        try:
+            bpm = max(20, min(int(float(bpm_raw)), 400))
+        except (ValueError, TypeError):
+            bpm = 120
         two_mallets = self.left_hand_var.get()
 
         trem_speed_raw = self.trem_speed_entry.get().strip()
@@ -1276,6 +1803,8 @@ class ScoreEditor(ctk.CTkFrame):
 
     def _play_tremolo_visual(self, bar_idx, repeat, hits_per_sec, two_mallets):
         """Animates the alternating left/right hands exactly 'repeat' times."""
+        if bar_idx is None:
+            return
         lh_idx = bar_idx + 7 if two_mallets else None
         has_lh = (lh_idx is not None and lh_idx <= 21)
 
@@ -1300,11 +1829,23 @@ class ScoreEditor(ctk.CTkFrame):
     def _audio_worker(self, score, bpm, two_mallets, hits_per_sec):
         import re
         _TOK_RE = re.compile(r'^(\d+)(#(\d+))?$')
+        _LEFT_RIGHT_RE = re.compile(r'^\((\d+)\)(\d+)(#(\d+))?$')
         events = []
 
         if self.current_sync_data:
             for i, item in enumerate(self.current_sync_data):
                 tok = str(item['note'])
+                m_lr = _LEFT_RIGHT_RE.match(tok)
+                if m_lr:
+                    left_bar = int(m_lr.group(1))
+                    bar = int(m_lr.group(2))
+                    is_trem = bool(m_lr.group(3))
+                    rep = int(m_lr.group(4)) if m_lr.group(4) else 1
+                    dur = (min(self.current_sync_data[i+1]['time'] - item['time'], 0.9)
+                           if i + 1 < len(self.current_sync_data) else 0.5)
+                    events.append({'bar': bar, 'left_bar': left_bar, 'is_trem': is_trem, 'repeat': rep, 'dur': dur})
+                    continue
+
                 m = _TOK_RE.match(tok)
                 if m:
                     bar = int(m.group(1))
@@ -1312,33 +1853,48 @@ class ScoreEditor(ctk.CTkFrame):
                     rep = int(m.group(3)) if m.group(3) else 1
                     dur = (min(self.current_sync_data[i+1]['time'] - item['time'], 0.9)
                            if i + 1 < len(self.current_sync_data) else 0.5)
-                    events.append({'bar': bar, 'is_trem': is_trem, 'repeat': rep, 'dur': dur})
+                    events.append({'bar': bar, 'left_bar': bar + 7, 'is_trem': is_trem, 'repeat': rep, 'dur': dur})
         else:
             beat = 60.0 / max(bpm, 1)
             for tok in score.replace('\n', ' ').split():
-                if tok in ('/', '-', '0', 'x'): continue
+                if tok in ('/', '-', '0', 'x', '_'): continue
+                
+                m_lr = _LEFT_RIGHT_RE.match(tok)
+                if m_lr:
+                    left_bar = int(m_lr.group(1))
+                    bar = int(m_lr.group(2))
+                    is_trem = bool(m_lr.group(3))
+                    rep = int(m_lr.group(4)) if m_lr.group(4) else 1
+                    events.append({'bar': bar, 'left_bar': left_bar, 'is_trem': is_trem, 'repeat': rep, 'dur': beat})
+                    continue
+
                 m = _TOK_RE.match(tok)
                 if m:
                     bar = int(m.group(1))
                     is_trem = bool(m.group(2))
                     rep = int(m.group(3)) if m.group(3) else 1
-                    events.append({'bar': bar, 'is_trem': is_trem, 'repeat': rep, 'dur': beat})
+                    events.append({'bar': bar, 'left_bar': bar + 7, 'is_trem': is_trem, 'repeat': rep, 'dur': beat})
 
         token_idx = [0]
 
-        def on_bar(bar_num):
+        def on_bar(bar_num, left_bar_num=None):
             self._playing_bar = bar_num
             if not (self._current_view == "roneat2d" and self._roneat_mode == "playback"):
+                return
+
+            if bar_num is None:
+                self.after(0, lambda: self._draw_roneat2d(None))
                 return
 
             if token_idx[0] < len(events):
                 ev = events[token_idx[0]]
                 token_idx[0] += 1
+                lb = left_bar_num if left_bar_num is not None else ev.get('left_bar', bar_num + 7)
 
                 if ev['is_trem']:
                     self.after(0, lambda: self._play_tremolo_visual(bar_num, ev['repeat'], hits_per_sec, two_mallets))
                 else:
-                    self.after(0, lambda: self._draw_roneat2d(bar_num, active_hand="both"))
+                    self.after(0, lambda: self._draw_roneat2d(bar_num, active_hand="both", active_left_bar=lb))
 
         self.player.play_score(score, bpm, two_mallets,
                                sync_data=self.current_sync_data,
@@ -1382,9 +1938,9 @@ class ScoreEditor(ctk.CTkFrame):
         # ── Dialog card ───────────────────────────────────────────────────────
         self.current_overlay = ctk.CTkFrame(parent,
                                             width=460,
-                                            fg_color=self.C["card"],
+                                            fg_color = self.C["card"],
                                             border_width=2,
-                                            border_color=self.C["accent"],
+                                            border_color = self.C["accent"],
                                             corner_radius=16)
 
         self.current_overlay.place(relx=0.5, rely=0.5, anchor="center")
@@ -1392,11 +1948,11 @@ class ScoreEditor(ctk.CTkFrame):
         # Title
         ctk.CTkLabel(self.current_overlay, text=title_text,
                      font=("Georgia", 20, "bold"),
-                     text_color=self.C["accent"]).pack(pady=(28, 18), padx=40)
+                     text_color = self.C["accent"]).pack(pady=(28, 18), padx=40)
 
         # Gold separator
         ctk.CTkFrame(self.current_overlay, height=1,
-                     fg_color=self.C["border"]).pack(fill="x", padx=24, pady=(0, 8))
+                     fg_color = self.C["border"]).pack(fill="x", padx=24, pady=(0, 8))
 
         build_content_cb(self.current_overlay)
 
@@ -1423,13 +1979,13 @@ class ScoreEditor(ctk.CTkFrame):
             cover_var = ctk.BooleanVar(value=False)
             ctk.CTkCheckBox(parent, text="Include cover page", variable=cover_var,
                             checkbox_height=20, checkbox_width=20,
-                            fg_color=self.C["accent"], hover_color=self.C["accent"],
+                            fg_color = self.C["accent"], hover_color = self.C["accent"],
                             font=("Helvetica", 13)).pack(anchor="w", padx=44, pady=8)
 
             row_var = ctk.BooleanVar(value=True)
             ctk.CTkCheckBox(parent, text="Show row numbers", variable=row_var,
                             checkbox_height=20, checkbox_width=20,
-                            fg_color=self.C["accent"], hover_color=self.C["accent"],
+                            fg_color = self.C["accent"], hover_color = self.C["accent"],
                             font=("Helvetica", 13)).pack(anchor="w", padx=44, pady=8)
 
             comp_row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -1437,8 +1993,15 @@ class ScoreEditor(ctk.CTkFrame):
 
             ctk.CTkLabel(comp_row, text="Composer:", font=("Helvetica", 13)).pack(side="left")
             comp_entry = ctk.CTkEntry(comp_row, width=200, height=32, corner_radius=6,
-                                      border_width=1, border_color=self.C["border"],
+                                      border_width=1, border_color = self.C["border"],
                                       font=("Helvetica", 13))
+            
+            # Use the current author from the main editor as default
+            current_auth = ""
+            if hasattr(self, "author_entry"):
+                current_auth = self.author_entry.get().strip()
+            comp_entry.insert(0, current_auth)
+            
             comp_entry.pack(side="left", padx=(10, 0))
 
             def confirm():
@@ -1455,13 +2018,13 @@ class ScoreEditor(ctk.CTkFrame):
 
             ctk.CTkButton(btn_row, text="Export", command=confirm,
                           width=100, height=36, corner_radius=8,
-                          fg_color=self.C["accent"], text_color="#0d1117", hover_color="#deba7e",
+                          fg_color = self.C["accent"], text_color="#0d1117", hover_color="#deba7e",
                           font=("Helvetica", 13, "bold")).pack(side="left", padx=10)
 
             ctk.CTkButton(btn_row, text="Cancel", command=self._close_overlay,
                           width=100, height=36, corner_radius=8,
-                          fg_color="transparent", border_width=1, border_color=self.C["border"],
-                          text_color=self.C["text"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text"][0], hover_color=self.C["card"],
+                          fg_color="transparent", border_width=1, border_color = self.C["border"],
+                          text_color = self.C["text"], hover_color = self.C["card"],
                           font=("Helvetica", 13)).pack(side="left", padx=4)
 
         self._show_overlay("PDF Export Options", build_pdf_content)
@@ -1472,7 +2035,7 @@ class ScoreEditor(ctk.CTkFrame):
         grid_val  = self.grid_combo.get().split(" ")[0]
         columns   = int(grid_val) if grid_val.isdigit() else 16
         raw_title = self.title_entry.get().strip()
-        safe_name = "".join(ch for ch in raw_title if ch.isalnum() or ch in " _-").strip() or "score"
+        safe_name = "".join(ch for ch in raw_title if ch not in '<>:"/\\|?*' and ord(ch) >= 32).strip() or "score"
 
         filepath = filedialog.asksaveasfilename(
             parent=self.winfo_toplevel(),
@@ -1488,32 +2051,40 @@ class ScoreEditor(ctk.CTkFrame):
 
         try:
             export_to_pdf(filepath, self.title_entry.get(),
-                          self.notes_box.get("0.0", "end"),
+                          self._get_numeric_score_text(),
                           mode_val, self.left_hand_var.get(), cols=columns,
                           show_cover=opts["cover"], composer=opts["composer"],
-                          show_row_numbers=opts["row_numbers"])
-            self.export_pdf_btn.configure(text="✓ Exported!", fg_color=self.C["green"])
+                          show_row_numbers=opts["row_numbers"],
+                          accent_hex=self.C["doc_accent"],
+                          view_mode=self.get_active_view_mode())
+            self.export_pdf_btn.configure(text="✓ Exported!", fg_color = self.C["green"])
         except Exception as e:
             self.export_pdf_btn.configure(text="Failed", fg_color=self.C["accent2"])
             print(f"[PDF] {e}")
 
         self.after(2000, lambda: self.export_pdf_btn.configure(
-            text="Export to PDF", fg_color=self.C["accent"], state="normal"))
+            text="Export to PDF", fg_color = self.C["accent"], state="normal"))
 
     # =========================================================================
     # MP4 EXPORT
     # =========================================================================
 
     def export_mp4(self):
+        import sys as _sys
         missing = []
         try:
-            import imageio
-            try: import imageio_ffmpeg  # noqa
-            except ImportError: pass
-        except ImportError: missing.append("imageio[ffmpeg]")
+            import imageio  # noqa
+            if not getattr(_sys, 'frozen', False):
+                try:
+                    import imageio_ffmpeg  # noqa
+                except ImportError:
+                    pass
+        except ImportError:
+            missing.append("imageio[ffmpeg]")
         try:
             from PIL import Image  # noqa
-        except ImportError: missing.append("Pillow")
+        except ImportError:
+            missing.append("Pillow")
 
         if missing:
             messagebox.showerror(
@@ -1522,359 +2093,9 @@ class ScoreEditor(ctk.CTkFrame):
                 "Please install and restart.")
             return
 
-        def build_video_content(parent):
-            show_title_var = ctk.BooleanVar(value=True)
-            ctk.CTkCheckBox(parent, text="Show song title above the instrument",
-                            variable=show_title_var,
-                            checkbox_height=20, checkbox_width=20,
-                            fg_color=self.C["accent"], hover_color=self.C["accent"],
-                            font=("Helvetica", 13)).pack(anchor="w", padx=44, pady=8)
+        from ui.views.video_export_studio import VideoExportStudioWindow
+        studio = VideoExportStudioWindow(self.winfo_toplevel(), self)
 
-            theme_var = ctk.StringVar(value="dark")
-            theme_row = ctk.CTkFrame(parent, fg_color="transparent")
-            theme_row.pack(anchor="w", padx=44, pady=10)
-
-            ctk.CTkLabel(theme_row, text="Video theme:", font=("Helvetica", 13)).pack(side="left", padx=(0, 14))
-
-            ctk.CTkRadioButton(theme_row, text="Dark", variable=theme_var, value="dark",
-                               radiobutton_width=20, radiobutton_height=20,
-                               fg_color=self.C["accent"], hover_color=self.C["accent"],
-                               font=("Helvetica", 13)).pack(side="left", padx=6)
-
-            ctk.CTkRadioButton(theme_row, text="Light (beige)", variable=theme_var, value="light",
-                               radiobutton_width=20, radiobutton_height=20,
-                               fg_color=self.C["accent"], hover_color=self.C["accent"],
-                               font=("Helvetica", 13)).pack(side="left", padx=6)
-
-            def confirm():
-                opts = {
-                    "show_title": show_title_var.get(),
-                    "dark_mode": theme_var.get() == "dark"
-                }
-                self._close_overlay()
-                self._execute_mp4_export(opts)
-
-            btn_row = ctk.CTkFrame(parent, fg_color="transparent")
-            btn_row.pack(pady=(25, 25))
-
-            ctk.CTkButton(btn_row, text="Export", command=confirm,
-                          width=100, height=36, corner_radius=8,
-                          fg_color=self.C["accent"], text_color="#0d1117", hover_color="#deba7e",
-                          font=("Helvetica", 13, "bold")).pack(side="left", padx=10)
-
-            ctk.CTkButton(btn_row, text="Cancel", command=self._close_overlay,
-                          width=100, height=36, corner_radius=8,
-                          fg_color="transparent", border_width=1, border_color=self.C["border"],
-                          text_color=self.C["text"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text"][0], hover_color=self.C["card"],
-                          font=("Helvetica", 13)).pack(side="left", padx=4)
-
-        self._show_overlay("Video Export Options", build_video_content)
-
-    def _execute_mp4_export(self, opts):
-        raw_title = self.title_entry.get().strip()
-        safe_name = "".join(ch for ch in raw_title if ch.isalnum() or ch in " _-").strip() or "roneat_video"
-
-        filepath = filedialog.asksaveasfilename(
-            parent=self.winfo_toplevel(),
-            initialfile=f"{safe_name}.mp4",
-            defaultextension=".mp4",
-            filetypes=[("MP4 Video", "*.mp4")])
-
-        if not filepath:
-            return
-
-        trem_speed_raw = self.trem_speed_entry.get().strip()
-        hits_per_sec = float(trem_speed_raw) if trem_speed_raw.replace('.','',1).isdigit() else 10.0
-        opts["hits_per_sec"] = max(2.0, min(hits_per_sec, 64.0))
-        opts["score"] = self.notes_box.get("0.0", "end")
-        opts["bpm_raw"] = self.bpm_entry.get().strip()
-        opts["two_mal"] = self.left_hand_var.get()
-        opts["accent_col"] = self.C["accent"]
-        opts["song_title_raw"] = self.title_entry.get().strip()
-
-        self.export_mp4_btn.configure(text="Rendering...", state="disabled")
-        self.mp4_prog_frame.pack(fill="x", padx=18, pady=(0, 14))
-        self.mp4_prog_bar.set(0)
-        self.mp4_progress_lbl.configure(text="Preparing...", text_color=self.C["text_dim"][1] if ctk.get_appearance_mode() == "Dark" else self.C["text_dim"][0])
-
-        threading.Thread(
-            target=self._mp4_worker, args=(filepath, opts), daemon=True).start()
-
-    def _mp4_worker(self, filepath, opts):
-        try:
-            import imageio
-            import numpy as np
-            import soundfile as sf
-
-            show_title   = opts.get("show_title", True)
-            dark_mode    = opts.get("dark_mode",  True)
-            hits_per_sec = opts.get("hits_per_sec", 10.0)
-            score        = opts.get("score", "")
-            bpm_raw      = opts.get("bpm_raw", "120")
-            bpm          = int(bpm_raw) if bpm_raw.isdigit() and 20 <= int(bpm_raw) <= 400 else 120
-            two_mal      = opts.get("two_mal", True)
-            accent_col   = opts.get("accent_col", "#c8a96e")
-            song_title   = opts.get("song_title_raw", "") if show_title else ""
-
-            events_mp4 = expand_score(score)
-            beat_sec   = 60.0 / max(bpm, 1)
-            notes = []; durations = []; tokens = []
-
-            if self.current_sync_data:
-                sd_idx = 0
-                for ev in events_mp4:
-                    if ev['bar'] is None:
-                        continue
-                    if sd_idx < len(self.current_sync_data):
-                        t_curr = self.current_sync_data[sd_idx]['time']
-                        t_next = (self.current_sync_data[sd_idx + 1]['time']
-                                  if sd_idx + 1 < len(self.current_sync_data) else t_curr + 0.6)
-                        dur = max(0.1, min(t_next - t_curr, 2.0))
-                        sd_idx += 1
-                    else:
-                        dur = beat_sec
-                    if ev['is_tremolo']:
-                        dur = ev['repeat'] / hits_per_sec
-                    notes.append(ev['bar']); durations.append(dur)
-                    tokens.append(f"{ev['bar']}#{ev['repeat']}" if ev['is_tremolo'] else str(ev['bar']))
-            else:
-                for ev in events_mp4:
-                    if ev['bar'] is None:
-                        continue
-                    if ev['is_tremolo']:
-                        dur = ev['repeat'] / hits_per_sec
-                    else:
-                        dur = beat_sec * ev['beats']
-                    notes.append(ev['bar']); durations.append(dur)
-                    tokens.append(f"{ev['bar']}#{ev['repeat']}" if ev['is_tremolo'] else str(ev['bar']))
-
-            if not notes:
-                self.after(0, lambda: self._mp4_done(False, "No notes to render."))
-                return
-
-            fps = 30; W, H = 1920, 1080
-            total_frames = sum(max(1, int(d * fps)) for d in durations)
-
-            self.after(0, lambda: self.mp4_progress_lbl.configure(text="Synthesising audio..."))
-            render_player = RoneatPlayer(load_hz_preset(), mode=self.player.mode)
-            if self.player.mode == "samples":
-                render_player.load_samples()
-
-            audio_arr  = render_player.render_score_to_array(tokens, durations, two_mallets=two_mal, hits_per_sec=hits_per_sec)
-            audio_rate = render_player.sample_rate
-            tmp_wav    = filepath + "_tmp_audio.wav"
-            sf.write(tmp_wav, audio_arr, audio_rate)
-
-            self.after(0, lambda: self.mp4_progress_lbl.configure(text="Rendering frames..."))
-            tmp_video = filepath + "_tmp_video.mp4"
-            writer = imageio.get_writer(
-                tmp_video, fps=fps, codec="libx264", macro_block_size=1,
-                output_params=["-crf", "18", "-preset", "fast"])
-
-            frame_idx = 0
-            for ni, (bar, dur) in enumerate(zip(notes, durations)):
-                n_frames = max(1, int(dur * fps))
-                for fr in range(n_frames):
-                    frame = self._render_frame_hd(
-                        abs(int(bar)), W, H, fr, n_frames,
-                        dark_mode=dark_mode, song_title=song_title,
-                        two_mallets=two_mal, accent_hex=accent_col)
-                    writer.append_data(frame)
-                    frame_idx += 1
-                    if frame_idx % 15 == 0 or frame_idx == total_frames:
-                        pct = frame_idx / max(total_frames, 1)
-                        _ni, _tot = ni + 1, len(notes)
-                        _fi, _ft  = frame_idx, total_frames
-                        self.after(0, lambda p=pct, a=_ni, b=_tot, fi=_fi, ft=_ft: (
-                            self.mp4_prog_bar.set(p),
-                            self.mp4_progress_lbl.configure(
-                                text=f"Frame {fi}/{ft}  —  note {a}/{b}")))
-            writer.close()
-
-            self.after(0, lambda: self.mp4_progress_lbl.configure(text="Muxing audio + video..."))
-            import subprocess
-            import shutil as _sh
-
-            def _find_ffmpeg():
-                import sys
-                if getattr(sys, 'frozen', False):
-                    exe_dir = os.path.dirname(sys.executable)
-                    for name in ("ffmpeg.exe", "ffmpeg"):
-                        c = os.path.join(exe_dir, name)
-                        if os.path.exists(c):
-                            return c
-                dev = os.path.normpath(os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)), "..", "..", "ffmpeg.exe"))
-                if os.path.exists(dev):
-                    return dev
-                found = _sh.which("ffmpeg")
-                return found if found else "ffmpeg"
-
-            ffmpeg_bin = _find_ffmpeg()
-            cmd = [ffmpeg_bin, "-y",
-                   "-i", tmp_video, "-i", tmp_wav,
-                   "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                   "-shortest", filepath]
-            kwargs = {}
-            if os.name == "nt":
-                kwargs["creationflags"] = 0x08000000
-            res = subprocess.run(cmd, capture_output=True, **kwargs)
-
-            for tmp in (tmp_video, tmp_wav):
-                try:
-                    os.remove(tmp)
-                except Exception:
-                    pass
-
-            if res.returncode != 0:
-                err = res.stderr.decode(errors="ignore")[-400:]
-                print(f"[ffmpeg] {err}")
-                if os.path.exists(tmp_video):
-                    _sh.move(tmp_video, filepath)
-                self.after(0, lambda: self._mp4_done(
-                    True, "Video exported (no audio — ffmpeg not in PATH)."))
-            else:
-                self.after(0, lambda: self._mp4_done(True, "Video exported successfully!"))
-
-        except Exception as e:
-            import traceback; traceback.print_exc()
-            self.after(0, lambda err=str(e): self._mp4_done(False, f"Error: {err}"))
-
-    def _render_frame_hd(self, active_bar, W, H, frame_idx, total_frames,
-                         dark_mode=True, song_title="",
-                         two_mallets=True, accent_hex="#c8a96e"):
-        import numpy as np
-        from PIL import Image, ImageDraw, ImageFont
-
-        if dark_mode:
-            bg_rgb       = (13, 17, 23);  rail_rgb   = (60, 80, 100)
-            bar_face_rgb = (55, 75, 100); bar_strip  = (38, 55, 78)
-            tube_rgb     = (32, 48, 68);  lbl_rgb    = (70, 100, 130)
-            lh_face_rgb  = (40, 100, 170); lh_tube   = (30, 80, 140)
-            status_rgb   = (180, 150, 80); title_rgb = (200, 169, 110)
-        else:
-            bg_rgb       = (245, 238, 218); rail_rgb  = (140, 120, 88)
-            bar_face_rgb = (195, 175, 135); bar_strip = (160, 140, 100)
-            tube_rgb     = (215, 200, 165); lbl_rgb   = (90, 70, 40)
-            lh_face_rgb  = (50, 100, 180);  lh_tube  = (70, 130, 200)
-            status_rgb   = (110, 80, 25);   title_rgb = (90, 60, 15)
-
-        def hex_rgb(h):
-            h = h.lstrip('#')
-            return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-
-        accent_rgb = hex_rgb(accent_hex)
-        img  = Image.new("RGB", (W, H), bg_rgb)
-        draw = ImageDraw.Draw(img)
-
-        def gfont(size, bold=False):
-            names = (["C:/Windows/Fonts/LeelawUI.ttf",
-                      "C:/Windows/Fonts/KhmerUI.ttf",
-                      "C:/Windows/Fonts/DaunPenh.ttf",
-                      "arialbd.ttf", "Arial Bold.ttf", "DejaVuSans-Bold.ttf"]
-                     if bold else
-                     ["C:/Windows/Fonts/LeelawUI.ttf",
-                      "C:/Windows/Fonts/KhmerUI.ttf",
-                      "C:/Windows/Fonts/DaunPenh.ttf",
-                      "arial.ttf", "Arial.ttf", "DejaVuSans.ttf"])
-            for n in names:
-                try:
-                    return ImageFont.truetype(n, size)
-                except Exception:
-                    pass
-            return ImageFont.load_default()
-
-        title_h = 0
-        if song_title:
-            title_h = 100
-            tf = gfont(125, True)
-            bb = draw.textbbox((0, 0), song_title, font=tf)
-            draw.text(((W - (bb[2] - bb[0])) // 2, 30), song_title,
-                      fill=title_rgb, font=tf)
-
-        n_bars = 21; pad_x = 130; gap = 8
-        bar_w  = (W - pad_x * 2 - gap * (n_bars - 1)) / n_bars
-        rail_t = title_h + 140; rail_h2 = 20
-        avail  = H - rail_t - rail_h2 - 130
-        min_bh = int(avail * 0.22); max_bh = int(avail * 0.82)
-
-        draw.rectangle([pad_x - 14, rail_t, W - pad_x + 14, rail_t + rail_h2], fill=rail_rgb)
-
-        for i in range(n_bars):
-            bar_num = 21 - i
-            t       = i / (n_bars - 1)
-            bh      = int(max_bh - t * (max_bh - min_bh))
-            x0      = int(pad_x + i * (bar_w + gap))
-            x1      = int(x0 + bar_w)
-            y0      = rail_t + rail_h2; y1 = y0 + bh
-            cx      = (x0 + x1) // 2
-
-            is_rh = active_bar is not None and bar_num == active_bar
-            is_lh = (two_mallets and active_bar is not None
-                     and bar_num == active_bar + 7 and bar_num <= 21)
-
-            if is_rh:
-                glow = tuple(min(255, c + 90) for c in accent_rgb)
-                draw.rectangle([x0 - 6, y0 - 6, x1 + 6, y1 + 10], fill=glow)
-            elif is_lh:
-                draw.rectangle([x0 - 6, y0 - 6, x1 + 6, y1 + 10], fill=(110, 185, 240))
-
-            face  = accent_rgb if is_rh else (lh_face_rgb if is_lh else bar_face_rgb)
-            strip = (tuple(max(0, c - 55) for c in accent_rgb) if is_rh
-                     else (lh_tube if is_lh else bar_strip))
-            draw.rectangle([x0, y0, x1, y1], fill=face)
-            sp = max(3, int(bar_w * 0.20))
-            draw.rectangle([x0, y0, x0 + sp, y1], fill=strip)
-
-            if is_rh and total_frames > 0:
-                pulse  = 0.4 + 0.6 * math.sin(frame_idx / total_frames * math.pi)
-                bright = tuple(min(255, int(c + pulse * 70)) for c in face)
-                draw.rectangle([x0 + sp, y0, x1, y0 + int(bh * 0.25)], fill=bright)
-
-            tr  = max(10, int(bar_w * 0.33))
-            tcy = y1 + tr + 12 + (tr // 2 if i % 2 == 0 else 0)
-            cord = (70, 95, 115) if dark_mode else (120, 100, 70)
-            draw.line([(cx, y1), (cx, tcy - tr)], fill=cord, width=2)
-            tf2 = (accent_rgb if is_rh else lh_face_rgb if is_lh else tube_rgb)
-            draw.ellipse([cx - tr, tcy - tr, cx + tr, tcy + tr], fill=tf2)
-
-            lbl_y  = tcy + tr + 10
-            lbl_sz = max(12, min(int(bar_w * 0.45), 24))
-            lc     = (accent_rgb if is_rh else lh_face_rgb if is_lh else lbl_rgb)
-            lf     = gfont(lbl_sz, True)
-            bb2    = draw.textbbox((0, 0), str(bar_num), font=lf)
-            draw.text((cx - (bb2[2] - bb2[0]) // 2, lbl_y), str(bar_num),
-                      fill=lc, font=lf)
-
-        if active_bar and 1 <= active_bar <= 21:
-            lh_n = active_bar + 7
-            status = (f"Right hand: {active_bar}     Left hand: {lh_n}"
-                      if two_mallets and lh_n <= 21 else f"Bar {active_bar}")
-            sf2 = gfont(58, True)
-            bb3 = draw.textbbox((0, 0), status, font=sf2)
-            draw.text(((W - (bb3[2] - bb3[0])) // 2, H - 90), status,
-                      fill=status_rgb, font=sf2)
-
-        return np.array(img)
-
-    def _mp4_done(self, success, msg):
-        self.mp4_prog_bar.set(1.0 if success else 0.0)
-        self.mp4_progress_lbl.configure(
-            text=msg,
-            text_color=self.C["green"] if success else self.C["accent2"])
-        txt = "✓ Video exported!" if success else "Export failed"
-        col = self.C["green"]     if success else self.C["accent2"]
-        self.export_mp4_btn.configure(
-            text=txt,
-            fg_color=col if success else "transparent",
-            text_color="#0d1117" if success else col,
-            state="normal")
-        self.after(3500, lambda: (
-            self.export_mp4_btn.configure(
-                text="Export 2D Video (MP4)", fg_color="transparent",
-                text_color=self.C["accent"], state="normal"),
-            self.mp4_prog_frame.pack_forget(),
-            self.mp4_prog_bar.set(0)))
 
     # =========================================================================
     # CANVAS PREVIEW (TABLE VIEW)
@@ -1884,6 +2105,11 @@ class ScoreEditor(ctk.CTkFrame):
         if self._current_view == "roneat2d":
             self._draw_roneat2d(self._playing_bar)
             return
+
+        if hasattr(self, "_roneat2d_frame") and self._current_view != "roneat2d":
+            self._roneat2d_frame.grid_remove()
+        self._canvas_container.grid(row=2, column=0, sticky="nsew", padx=0, pady=(4, 0))
+
         self.canvas.delete("all")
         cw = self.canvas.winfo_width()
         if cw < 100:
@@ -1897,42 +2123,69 @@ class ScoreEditor(ctk.CTkFrame):
         page_gap = 36
 
         is_dark   = ctk.get_appearance_mode() == "Dark"
-        bg_col    = "#0d1117" if is_dark else "#f1f5f9"
-        pg_col    = "#161b22" if is_dark else "#ffffff"
-        pg_bdr    = "#30363d" if is_dark else "#cbd5e1"
-        cell_bg   = "#1c2128" if is_dark else "#f8fafc"
-        cell_bd   = "#30363d" if is_dark else "#94a3b8"
-        bar_col   = "#30363d" if is_dark else "#0f172a"
-        note_col  = self.C["accent"]
-        lh_col    = self.C["blue"]
-        rest_col  = "#8b949e"
-        title_col = self.C["accent"]
-        sub_col   = "#8b949e" if is_dark else "#64748b"
-        trem_col  = "#f59e0b"
+        bg_col = self._clr(self.C["bg"])       # #121212
+        pg_col = self._clr(self.C["card"])     # #252525 — page card bg
+        pg_bdr = self._clr(self.C["border"])   # #333333
+        cell_bd = self._clr(self.C["border"])   # #333333
+        bar_col   = "#555555"          # bar separator line
+        note_col = self.C["doc_accent"]
+        cell_bg = "#ffffff"  # white background like paper
+        stroke_col = self._clr(("#EAEAEA", "#3E444D"))
+        fill_col = self._clr(self.C["text"])
+        sub_col = self._clr(self.C["text_dim"])
+        trem_col  = self.C["doc_accent"]
+        lh_col = self._clr(self.C["blue"])
+        rest_col = self._clr(self.C["text_dim"])
+        title_col = self.C["doc_accent"]
 
         self.canvas.configure(bg=bg_col)
 
+        mode = self.get_active_view_mode()
         import re
-        text      = self.notes_box.get("0.0", "end-1c")
-        _TOK_RE   = re.compile(r'^(\d+)(#(\d+))?$')
-        raw_tokens = text.replace('\n', ' ').split()
+        # Parse the NUMERIC form so _TOK_RE always matches integers —
+        # notes_box may be encoded in Letters or Syllabic right now.
+        numeric_text = self._get_numeric_score_text()
+        _TOK_RE      = re.compile(r'^(\d+)(#(\d+))?$')
+        _LEFT_RIGHT_RE = re.compile(r'^\((\d+)\)(\d+)(#(\d+))?$')
+        raw_tokens   = numeric_text.replace('\n', ' ').split()
         beats = []
         for tok in raw_tokens:
             if tok == '/':
                 if beats:
                     beats[-1]['barline'] = True
                 continue
+            if tok == '_':
+                beats.append({'bar': None, 'text': '_', 'barline': False,
+                              'is_trem': False, 'repeat': 1, 'is_line_rest': True, 'left_bar': None})
+                continue
             if tok in ('-', '0', 'x'):
                 beats.append({'bar': None, 'text': '-', 'barline': False,
-                              'is_trem': False, 'repeat': 1})
+                              'is_trem': False, 'repeat': 1, 'is_line_rest': False, 'left_bar': None})
                 continue
+            
+            m_lr = _LEFT_RIGHT_RE.match(tok)
+            if m_lr:
+                left_bar = int(m_lr.group(1))
+                bar  = int(m_lr.group(2))
+                is_t = bool(m_lr.group(3))
+                rep  = int(m_lr.group(4)) if m_lr.group(4) else 1
+                visual_bar = translate_note(bar, mode)
+                beats.append({'bar': bar, 'left_bar': left_bar,
+                              'visual_text': f"{visual_bar}~{rep}" if is_t else visual_bar,
+                              'visual_bar': visual_bar,
+                              'barline': False, 'is_trem': is_t, 'repeat': rep, 'is_line_rest': False})
+                continue
+                
             m = _TOK_RE.match(tok)
             if m:
                 bar  = int(m.group(1))
                 is_t = bool(m.group(2))
                 rep  = int(m.group(3)) if m.group(3) else 1
-                beats.append({'bar': bar, 'text': f"{bar}~{rep}" if is_t else str(bar),
-                              'barline': False, 'is_trem': is_t, 'repeat': rep})
+                visual_bar = translate_note(bar, mode)
+                beats.append({'bar': bar, 'left_bar': bar + 7,
+                              'visual_text': f"{visual_bar}~{rep}" if is_t else visual_bar,
+                              'visual_bar': visual_bar,
+                              'barline': False, 'is_trem': is_t, 'repeat': rep, 'is_line_rest': False})
 
         grid_val   = self.grid_combo.get().split(" ")[0]
         cols       = int(grid_val) if grid_val.isdigit() else 16
@@ -1940,16 +2193,22 @@ class ScoreEditor(ctk.CTkFrame):
         cell_w     = (page_w - 100) / cols
         cell_h     = min(62, max(30, cell_w * 1.2))
         row_gap    = 26
+
+        for i, bd in enumerate(beats):
+            bd['original_index'] = i
+        grouped_rows = group_beats_into_rows(beats, cols)
+
         rows_pp    = max(1, math.floor((page_h - 180) / (cell_h + row_gap)))
-        total_rows = math.ceil(len(beats) / cols) if beats else 1
+        total_rows = len(grouped_rows) if grouped_rows else 1
         num_pages  = math.ceil(total_rows / rows_pp) if total_rows > 0 else 1
         total_h    = num_pages * (page_h + page_gap) + page_gap
         self.canvas.configure(scrollregion=(0, 0, c_width, total_h))
 
         show_left = self.left_hand_var.get()
         show_nums = self.show_numbers_var.get()
-        idx = 0
+        self._beat_rects = []  # reset click regions
 
+        row_global_idx = 0
         for pn in range(num_pages):
             ys     = page_gap + pn * (page_h + page_gap)
             shadow = "#0a0d14" if is_dark else "#c8d4e0"
@@ -1966,76 +2225,331 @@ class ScoreEditor(ctk.CTkFrame):
                 self.canvas.create_text(x_off + page_w / 2, ys + 60,
                     text=self.title_entry.get(),
                     font=("Georgia", 24, "bold"), fill=title_col)
-                self.canvas.create_text(x_off + page_w / 2, ys + 104,
-                    text="Roneat Ek Score",
-                    font=("Georgia", 10), fill=sub_col)
+                author = self.author_entry.get().strip() if hasattr(self, 'author_entry') else ""
+                if author and author.lower() != "anonymous":
+                    self.canvas.create_text(x_off + page_w / 2, ys + 104,
+                        text=f"Composer: {author}",
+                        font=("Georgia", 10), fill=sub_col)
                 grid_y = ys + 148
             else:
                 grid_y = ys + 56
 
             row_i = 0
-            while idx < len(beats) and row_i < rows_pp:
+            while row_global_idx < len(grouped_rows) and row_i < rows_pp:
+                row = grouped_rows[row_global_idx]
+                cells = row['cells']
                 cy_top = grid_y + row_i * (cell_h + row_gap)
                 x      = x_off + 50
+                
                 for col_i in range(cols):
-                    if idx >= len(beats):
-                        self.canvas.create_rectangle(x, cy_top, x + cell_w, cy_top + cell_h,
-                                                     outline=cell_bd, fill=cell_bg)
-                        x += cell_w; continue
                     self.canvas.create_rectangle(x, cy_top, x + cell_w, cy_top + cell_h,
                                                  outline=cell_bd, fill=cell_bg)
-                    cx_ = x + cell_w / 2
-                    cy_ = cy_top + cell_h / 2
-                    bd  = beats[idx]
-                    if show_nums and bd['bar'] is not None:
-                        bar  = bd['bar']
-                        is_t = bd['is_trem']
-                        rep  = bd['repeat']
-                        fs   = min(font_size, max(9, int(cell_w * 0.42)))
-                        if is_t:
-                            lbl = f"{bar}~{rep}"
-                            if show_left:
-                                self.canvas.create_text(cx_, cy_ - fs * 0.45, text=lbl,
-                                    font=("Courier", int(fs * 0.82), "bold"), fill=trem_col)
-                                lh = bar + 7
-                                if lh <= 21:
-                                    self.canvas.create_text(cx_, cy_ + fs * 0.65,
-                                        text=f"{lh}~{rep}",
-                                        font=("Courier", int(fs * 0.55), "bold"), fill=lh_col)
-                            else:
-                                self.canvas.create_text(cx_, cy_, text=lbl,
-                                    font=("Courier", fs, "bold"), fill=trem_col)
-                        else:
-                            if show_left:
-                                self.canvas.create_text(cx_, cy_ - fs * 0.45, text=str(bar),
-                                    font=("Courier", int(fs * 0.9), "bold"), fill=note_col)
-                                lh = bar + 7
-                                if lh <= 21:
-                                    self.canvas.create_text(cx_, cy_ + fs * 0.65, text=str(lh),
-                                        font=("Courier", int(fs * 0.6), "bold"), fill=lh_col)
-                            else:
-                                self.canvas.create_text(cx_, cy_, text=str(bar),
-                                    font=("Courier", fs, "bold"), fill=note_col)
-                    elif bd['bar'] is None:
-                        fs = min(font_size, max(9, int(cell_w * 0.42)))
-                        self.canvas.create_text(cx_, cy_, text="-",
-                            font=("Courier", fs, "bold"), fill=rest_col)
+                    
+                    if col_i < len(cells):
+                        bd = cells[col_i]
+                        orig_idx = bd['original_index']
+                        self._beat_rects.append((orig_idx, x, cy_top, x + cell_w, cy_top + cell_h))
+                        cx_ = x + cell_w / 2
+                        cy_ = cy_top + cell_h / 2
+                        
+                        if show_nums and bd['bar'] is not None:
+                            bar  = bd['bar']
+                            is_t = bd['is_trem']
+                            rep  = bd['repeat']
+                            lbl = bd['visual_text']
+                            vbar = bd['visual_bar']
+                            
+                            fs = min(font_size, max(9, int(cell_w * 0.42)))
+                            if mode in ["Syllabic", "Letters"]:
+                                fs = int(fs * 0.8) # scale down for Solfeggio syllables
 
-                    measure_val = self.measure_combo.get()
-                    is_barline  = False
-                    if "Manual" not in measure_val:
-                        group = 4 if "4" in measure_val else 8
-                        if (col_i + 1) % group == 0 and col_i < cols - 1:
+                            if is_t:
+                                if show_left:
+                                    self.canvas.create_text(cx_, cy_ - fs * 0.45, text=lbl,
+                                        font=("Courier", int(fs * 0.82), "bold"), fill=trem_col)
+                                    lh = bd.get('left_bar') or (bar + 7)
+                                    lh_vbar = translate_note(lh, mode)
+                                    if lh <= 21:
+                                        self.canvas.create_text(cx_, cy_ + fs * 0.65,
+                                            text=f"{lh_vbar}~{rep}",
+                                            font=("Courier", int(fs * 0.55), "bold"), fill=lh_col)
+                                else:
+                                    self.canvas.create_text(cx_, cy_, text=lbl,
+                                        font=("Courier", fs, "bold"), fill=trem_col)
+                            else:
+                                if show_left:
+                                    self.canvas.create_text(cx_, cy_ - fs * 0.45, text=vbar,
+                                        font=("Courier", int(fs * 0.9), "bold"), fill=note_col)
+                                    lh = bd.get('left_bar') or (bar + 7)
+                                    lh_vbar = translate_note(lh, mode)
+                                    if lh <= 21:
+                                        self.canvas.create_text(cx_, cy_ + fs * 0.65, text=lh_vbar,
+                                            font=("Courier", int(fs * 0.6), "bold"), fill=lh_col)
+                                else:
+                                    self.canvas.create_text(cx_, cy_, text=vbar,
+                                        font=("Courier", fs, "bold"), fill=note_col)
+                        elif bd['bar'] is None:
+                            fs = min(font_size, max(9, int(cell_w * 0.42)))
+                            self.canvas.create_text(cx_, cy_, text="-",
+                                font=("Courier", fs, "bold"), fill=rest_col)
+                                
+                        measure_val = self.measure_combo.get()
+                        is_barline  = False
+                        if "Manual" not in measure_val:
+                            group = 4 if "4" in measure_val else 8
+                            if (col_i + 1) % group == 0 and col_i < cols - 1:
+                                is_barline = True
+                        elif bd.get('barline'):
                             is_barline = True
-                    elif bd.get('barline'):
-                        is_barline = True
-                    if is_barline:
-                        self.canvas.create_line(x + cell_w, cy_top, x + cell_w, cy_top + cell_h,
-                                                fill=bar_col, width=2)
-                    idx += 1
-                    x   += cell_w
+                        if is_barline:
+                            self.canvas.create_line(x + cell_w, cy_top, x + cell_w, cy_top + cell_h,
+                                                    fill=bar_col, width=2)
+                    
+                    x += cell_w
+                
+                if row.get('line_below'):
+                    line_color = "#000000" if not is_dark else "#FFFFFF"
+                    self.canvas.create_line(x_off + 50, cy_top + cell_h + row_gap / 2,
+                                            x_off + 50 + cols * cell_w, cy_top + cell_h + row_gap / 2,
+                                            width=1.5, fill=line_color)
+                row_global_idx += 1
                 row_i += 1
 
             self.canvas.create_text(x_off + page_w / 2, ys + page_h - 18,
                 text=f"- {pn + 1} / {num_pages} -",
                 font=("Georgia", 9), fill=sub_col)
+
+    def _on_canvas_click(self, event) -> None:
+        """Handle canvas left-click: open inline editor for the clicked note cell."""
+        cx = self.canvas.canvasx(event.x)
+        cy = self.canvas.canvasy(event.y)
+        for (beat_idx, x0, y0, x1, y1) in self._beat_rects:
+            if x0 <= cx <= x1 and y0 <= cy <= y1:
+                self._active_cell_idx = beat_idx
+                self.canvas.focus_set()   # canvas must have keyboard focus for arrow keys
+                self._open_cell_editor(beat_idx, x0, y0, x1, y1)
+                return
+
+    def _navigate_cell(self, delta: int) -> None:
+        """
+        Move the active cell by *delta* positions (-1 = previous, +1 = next)
+        and open its inline editor.  Wraps at list boundaries.
+        """
+        if not self._beat_rects:
+            return
+        n = len(self._beat_rects)
+        # Start from current position or beginning
+        if self._active_cell_idx is None:
+            next_idx = 0
+        else:
+            # Find the position of active_cell_idx within _beat_rects
+            positions = [r[0] for r in self._beat_rects]
+            try:
+                pos = positions.index(self._active_cell_idx)
+            except ValueError:
+                pos = 0
+            pos = (pos + delta) % n
+            next_idx = positions[pos]
+
+        self._active_cell_idx = next_idx
+        # Find the rect for this cell
+        for (beat_idx, x0, y0, x1, y1) in self._beat_rects:
+            if beat_idx == next_idx:
+                # Scroll canvas so the cell is visible
+                canvas_h = self.canvas.winfo_height()
+                _, _, _, scroll_h = self.canvas.bbox("all") if self.canvas.find_all() else (0, 0, 0, 1)
+                if scroll_h > 0:
+                    frac = max(0.0, min(1.0, (y0 - canvas_h / 3) / scroll_h))
+                    self.canvas.yview_moveto(frac)
+                self._open_cell_editor(beat_idx, x0, y0, x1, y1)
+                return
+
+    def _open_cell_editor(self, beat_idx: int, x0: float, y0: float,
+                          x1: float, y1: float) -> None:
+        """
+        Floating Entry widget overlaid on the clicked canvas cell.
+
+        - Populates with the *display* string for the current notation mode.
+        - Accepts input in the current mode (case-insensitive for Letters/Syllabic).
+        - On commit, converts back to a raw integer token via NotationTranslator
+          and writes that integer to notes_box (keeping the data model numeric).
+        """
+        import re
+        from core.rendering.translation import NotationTranslator
+
+        mode = self.get_active_view_mode()   # "Numeric" | "Letters" | "Syllabic"
+
+        text = self.notes_box.get("0.0", "end-1c")
+        raw_tokens: list[str] = []
+        beat_map: list[int] = []   # maps beat_idx → position in raw_tokens
+
+        for raw in text.replace('\n', ' ').split():
+            if raw == '/':
+                raw_tokens.append(raw)
+                continue
+            raw_tokens.append(raw)
+            beat_map.append(len(raw_tokens) - 1)
+
+        if beat_idx >= len(beat_map):
+            return
+        tok_pos = beat_map[beat_idx]
+        current_raw = raw_tokens[tok_pos]   # raw integer string, e.g. "9" or "9#3" or "-"
+
+        # ── Determine display value for the editor ────────────────────────
+        # notes_box is already in the current display mode, so current_raw
+        # is already the display string (e.g. "Si2", "B2", "9", "-").
+        # For numeric mode we still want the plain integer shown.
+        _LEFT_RIGHT_NUM_RE = re.compile(r'^\((\d+)\)(\d+)(#(\d+))?$')
+        _NOTE_RE = re.compile(r'^(\d+)(#(\d+))?$')
+        
+        m_lr = _LEFT_RIGHT_NUM_RE.match(current_raw)
+        m = _NOTE_RE.match(current_raw)
+        
+        if mode != "Numeric" and (m_lr or m):
+            if m_lr:
+                left_bar = int(m_lr.group(1))
+                right_bar = int(m_lr.group(2))
+                lh_str = NotationTranslator.index_to_string(left_bar, mode)
+                rh_str = NotationTranslator.index_to_string(right_bar, mode)
+                if m_lr.group(3):
+                    display_val = f"({lh_str}){rh_str}#{m_lr.group(4)}"
+                else:
+                    display_val = f"({lh_str}){rh_str}"
+            else:
+                bar_int = int(m.group(1))
+                display_val = NotationTranslator.index_to_string(bar_int, mode)
+                if m.group(2):
+                    display_val = f"{display_val}#{m.group(3)}"
+        else:
+            display_val = current_raw   # already in display mode ("-", "Si2", "B2", "9")
+
+        # ── Overlay dimensions ────────────────────────────────────────────
+        w = int(x1 - x0)
+        h = int(y1 - y0)
+
+        hint = NotationTranslator.valid_hints(mode)
+        entry_var = tk.StringVar(value=display_val)
+        entry = tk.Entry(
+            self.canvas,
+            textvariable=entry_var,
+            font=("Courier", max(9, min(14, int(w * 0.38)))),
+            bd=0, highlightthickness=2,
+            highlightcolor=self._clr(self.C["accent"]),
+            highlightbackground=self._clr(self.C["accent"]),
+            bg="#FFFFFF", fg="#111111",
+            justify="center"
+        )
+        entry_win = self.canvas.create_window(x0, y0, anchor="nw",
+                                              window=entry, width=w, height=h)
+        entry.focus_set()
+        entry.select_range(0, "end")
+
+        # Tooltip showing valid values
+        _tip = tk.Label(
+            self.canvas, text=hint,
+            bg="#2b2b2b", fg="#cccccc",
+            font=("Courier", 8), bd=0, padx=4, pady=2
+        )
+        _tip_win = self.canvas.create_window(x0, y1, anchor="nw", window=_tip)
+
+        def _destroy_tip():
+            try:
+                self.canvas.delete(_tip_win)
+                _tip.destroy()
+            except Exception:
+                pass
+
+        def _commit(ev=None):
+            _destroy_tip()
+            raw_input = entry_var.get().strip()
+
+            if not raw_input or raw_input in ('-', '0', 'x', '_'):
+                # Rest / silence / visual separator
+                raw_tokens[tok_pos] = "-" if raw_input in ('', '-', '0', 'x') else raw_input
+                _flush()
+                return
+
+            # Convert display string → integer index
+            if mode == "Numeric":
+                # Accept plain int or int#trem or (left)right or (left)right#trem
+                _LR_NUM = re.compile(r'^\((\d+)\)(\d+)(#(\d+))?$')
+                _N_NUM = re.compile(r'^(\d+)(#(\d+))?$')
+                nm_lr = _LR_NUM.match(raw_input)
+                nm = _N_NUM.match(raw_input)
+                if nm_lr:
+                    left_bar = int(nm_lr.group(1))
+                    right_bar = int(nm_lr.group(2))
+                    if 1 <= left_bar <= 21 and 1 <= right_bar <= 21:
+                        raw_tokens[tok_pos] = raw_input
+                        _flush()
+                        return
+                elif nm:
+                    idx = int(nm.group(1))
+                    if 1 <= idx <= 21:
+                        raw_tokens[tok_pos] = raw_input
+                        _flush()
+                        return
+                _cancel()
+                return
+            else:
+                # Check for double note format in Letters/Syllabic: e.g. "(G1)C2#3"
+                lr_match = re.match(r'^\((.+?)\)(.+?)(#(\d+))?$', raw_input)
+                if lr_match:
+                    left_part = lr_match.group(1)
+                    right_part = lr_match.group(2)
+                    trem_part = lr_match.group(4) if lr_match.group(3) else None
+                    left_idx = NotationTranslator.string_to_index(left_part, mode)
+                    right_idx = NotationTranslator.string_to_index(right_part, mode)
+                    if left_idx is not None and right_idx is not None:
+                        lh_str = NotationTranslator.index_to_string(left_idx, mode)
+                        rh_str = NotationTranslator.index_to_string(right_idx, mode)
+                        new_token = f"({lh_str}){rh_str}"
+                        if trem_part:
+                            new_token = f"{new_token}#{trem_part}"
+                        raw_tokens[tok_pos] = new_token
+                        _flush()
+                    else:
+                        _cancel()
+                    return
+
+                # Check for single note tremolo suffix in Letters/Syllabic: e.g. "Sol#3"
+                trem_match = re.match(r'^(.+?)#(\d+)$', raw_input)
+                note_part  = trem_match.group(1) if trem_match else raw_input
+                trem_part  = trem_match.group(2) if trem_match else None
+
+                idx = NotationTranslator.string_to_index(note_part, mode)
+                if idx is None:
+                    _cancel()   # invalid input — do nothing
+                    return
+                display_token = NotationTranslator.index_to_string(idx, mode)
+                new_token = display_token
+                if trem_part:
+                    new_token = f"{display_token}#{trem_part}"
+                raw_tokens[tok_pos] = new_token
+                _flush()
+
+        def _flush():
+            new_text = ' '.join(raw_tokens)
+            self.notes_box.delete("0.0", "end")
+            self.notes_box.insert("0.0", new_text)
+            self._on_text_modified()
+            self.canvas.delete(entry_win)
+            entry.destroy()
+
+        def _cancel(ev=None):
+            _destroy_tip()
+            self.canvas.delete(entry_win)
+            entry.destroy()
+
+        entry.bind("<Return>",   _commit)
+        entry.bind("<KP_Enter>", _commit)
+        entry.bind("<FocusOut>", _commit)
+        entry.bind("<Escape>",   _cancel)
+        # Arrow key / Tab navigation: commit current cell and move to next/prev
+        def _commit_and_move(delta, ev=None):
+            _commit()
+            self.after(30, lambda: self._navigate_cell(delta))
+        entry.bind("<Right>",      lambda e: _commit_and_move(+1))
+        entry.bind("<Tab>",        lambda e: _commit_and_move(+1))
+        entry.bind("<Left>",       lambda e: _commit_and_move(-1))
+        entry.bind("<Shift-Tab>",  lambda e: _commit_and_move(-1))

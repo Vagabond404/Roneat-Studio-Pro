@@ -1,7 +1,13 @@
 """
-core/audio_player.py  v3.5
+core/audio_player.py  v3.6
 ============================
-Roneat Studio Pro — Audio Synthesis Engine
+Roneat Studio Pro — Dynamic Audio Routing Engine
+
+CHANGES in v3.6:
+  - Integrated plugin-based audio sample routing via get_audio_sample()
+  - Audio engine now dynamically loads .wav files from active instrument plugin
+  - Graceful fallback to ADSR synthesis if samples unavailable
+  - Error handling: missing samples logged as warnings, playback continues
 
 CHANGES in v3.5:
   - Tremolo completely rewritten: `repeat` is the EXACT number of strikes.
@@ -14,19 +20,37 @@ import sounddevice as sd
 import time
 import os
 import logging
+import threading
 
 from core.file_manager import DATA_DIR
 
 SAMPLES_DIR = os.path.join(DATA_DIR, "samples")
 
 
+def samples_available():
+    """Standalone check for calibration samples."""
+    if not os.path.exists(SAMPLES_DIR):
+        return False
+    # Check for bar_01.wav, etc.
+    files = os.listdir(SAMPLES_DIR)
+    return any(f.startswith("bar_") and f.endswith(".wav") for f in files)
+
+
 def _parse_token(token):
     """
     Parse a single score token.
-    Returns (bar_idx, repeat, is_tremolo) or (None, 1, False).
+    Returns (bar_idx, left_bar_idx, repeat, is_tremolo) or (None, None, 1, False).
     """
-    if token in ('/', '-', '0', 'x'):
-        return None, 1, False
+    if token in ('/', '-', '0', 'x', '_'):
+        return None, None, 1, False
+
+    import re
+    m_lr = re.match(r'^\((\d+)\)(\d+)(#(\d+))?$', token)
+    if m_lr:
+        left_bar = int(m_lr.group(1))
+        bar_idx = int(m_lr.group(2))
+        repeat = max(1, min(int(m_lr.group(4)), 32)) if m_lr.group(4) else 1
+        return bar_idx, left_bar, repeat, bool(m_lr.group(3))
 
     if '#' in token:
         parts  = token.split('#', 1)
@@ -43,52 +67,150 @@ def _parse_token(token):
         is_trem = False
 
     if not bar_s.isdigit():
-        return None, 1, False
+        return None, None, 1, False
 
     bar_idx = int(bar_s)
     if not (1 <= bar_idx <= 21):
-        return None, 1, False
+        return None, None, 1, False
 
-    return bar_idx, repeat, is_trem
+    return bar_idx, bar_idx + 7, repeat, is_trem
 
+
+# Obsolete Python backend removed in favor of C++ RoneatAudioCore
+
+
+from core.RoneatAudioCore import RoneatAudioCore
 
 class RoneatPlayer:
-    def __init__(self, roneat_dict, mode="adsr"):
+    def __init__(self, roneat_dict, mode="adsr", instrument_plugin=None):
         self.roneat_dict     = roneat_dict
         self.sample_rate     = 44100
         self.is_playing      = False
         self.mode            = mode
+        self.instrument_plugin = instrument_plugin  # Store active instrument plugin
         self._samples        = {}
         self._samples_loaded = False
+        self._plugin_samples = {}  # Cache for plugin-provided audio samples
+        
+        # Initialize C++ audio core
+        self.audio_core = RoneatAudioCore()
+        self.audio_core.initialize(self.sample_rate, 256)
+
+        # If plugin has custom frequencies, use them instead
+        if self.instrument_plugin and hasattr(self.instrument_plugin, 'get_note_frequencies'):
+            try:
+                plugin_freqs = self.instrument_plugin.get_note_frequencies()
+                if plugin_freqs:
+                    self.roneat_dict = plugin_freqs
+            except Exception:
+                pass  # Fall back to provided dict
 
     # ─────────────────────────────────────────────────────────────────────────
     # Sample management
     # ─────────────────────────────────────────────────────────────────────────
 
-    def load_samples(self):
-        self._samples = {}
-        if not os.path.exists(SAMPLES_DIR):
-            self._samples_loaded = True
-            return
+    def _load_audio_from_plugin(self, note: int) -> np.ndarray | None:
+        """
+        Load audio sample from the active instrument plugin.
+        """
+        if not self.instrument_plugin:
+            return None
+
         try:
-            import soundfile as sf
-            for bar_num in range(1, 22):
-                path = os.path.join(SAMPLES_DIR, f"bar_{bar_num:02d}.wav")
-                if os.path.exists(path):
+            # Try to get audio sample path from plugin
+            if not hasattr(self.instrument_plugin, 'get_audio_sample'):
+                return None
+
+            audio_path = self.instrument_plugin.get_audio_sample(note)
+            if audio_path is None:
+                return None
+
+            # Resolve path (handle relative and absolute paths)
+            if not os.path.isabs(audio_path):
+                project_root = os.path.dirname(os.path.dirname(
+                    os.path.dirname(os.path.abspath(__file__))
+                ))
+                audio_path = os.path.join(project_root, audio_path)
+
+            # Check if file exists
+            if not os.path.exists(audio_path):
+                return None
+
+            # Load audio file
+            try:
+                import soundfile as sf
+                data, sr = sf.read(audio_path, dtype='float32', always_2d=False)
+
+                # Convert to mono if stereo
+                if data.ndim == 2:
+                    data = data.mean(axis=1)
+
+                # Resample if necessary
+                if sr != self.sample_rate:
+                    try:
+                        import librosa
+                        data = librosa.resample(
+                            data, orig_sr=sr, target_sr=self.sample_rate
+                        )
+                    except Exception as e:
+                        logging.warning(f"[Audio] Error resampling audio: {e}")
+
+                return data.astype(np.float32)
+            except Exception as e:
+                logging.warning(f"[Audio] Failed to load plugin sample: {e}")
+                return None
+        except Exception as e:
+            return None
+
+    def load_samples(self):
+        """Load all notes into the C++ audio engine."""
+        self._samples = {}
+        
+        # Load up all valid notes from roneat_dict or up to max assumed notes (e.g., 21 or 32)
+        max_bars = 32
+        for bar_num in range(1, max_bars + 1):
+            if self.mode == "adsr":
+                if bar_num in self.roneat_dict:
+                    adsr_tone = self._adsr_tone(self.roneat_dict[bar_num], 2.0)
+                    self.audio_core.load_sample_from_buffer(bar_num, adsr_tone)
+                    self._samples[bar_num] = adsr_tone
+                continue
+
+            # 1. Try Plugin Sample
+            plugin_audio = self._load_audio_from_plugin(bar_num)
+            if plugin_audio is not None:
+                # Apply standard scaling/fading
+                duration = 2.0 # Assume 2 sec default length for full hit
+                processed = self._tone_from_sample(bar_num, duration, data=plugin_audio)
+                self.audio_core.load_sample_from_buffer(bar_num, processed)
+                self._samples[bar_num] = processed
+                continue
+
+            # 2. Try Local WAV Sample Mode
+            path = os.path.join(SAMPLES_DIR, f"bar_{bar_num:02d}.wav")
+            if os.path.exists(path):
+                try:
+                    import soundfile as sf
                     data, sr = sf.read(path, dtype='float32', always_2d=False)
                     if data.ndim == 2:
                         data = data.mean(axis=1)
                     if sr != self.sample_rate:
-                        try:
-                            import librosa
-                            data = librosa.resample(data, orig_sr=sr,
-                                                    target_sr=self.sample_rate)
-                        except Exception as e:
-                            logging.warning(f"Error resampling audio: {e}")
-                    self._samples[bar_num] = data
-            logging.info(f"[Player] Loaded {len(self._samples)} samples")
-        except Exception as e:
-            logging.error(f"[Player] Sample load error: {e}", exc_info=True)
+                        import librosa
+                        data = librosa.resample(data, orig_sr=sr, target_sr=self.sample_rate)
+                    
+                    processed = self._tone_from_sample(bar_num, 2.0, data=data)
+                    self.audio_core.load_sample_from_buffer(bar_num, processed)
+                    self._samples[bar_num] = processed
+                    continue
+                except Exception as e:
+                    logging.warning(f"Error loading sample {path}: {e}")
+
+            # 3. Fallback ADSR
+            if bar_num in self.roneat_dict:
+                adsr_tone = self._adsr_tone(self.roneat_dict[bar_num], 2.0)
+                self.audio_core.load_sample_from_buffer(bar_num, adsr_tone)
+                self._samples[bar_num] = adsr_tone
+
         self._samples_loaded = True
 
     def samples_available(self):
@@ -101,11 +223,35 @@ class RoneatPlayer:
     # ─────────────────────────────────────────────────────────────────────────
 
     def generate_tone(self, frequency, duration, bar_num=None):
+        """
+        Generate audio tone for a note.
+
+        First attempts to load audio from the active instrument plugin.
+        Falls back to ADSR synthesis if plugin samples unavailable.
+
+        Args:
+            frequency (float): Frequency in Hz for ADSR fallback
+            duration (float): Duration in seconds
+            bar_num (int, optional): Note number for plugin sample lookup
+
+        Returns:
+            np.ndarray: Audio data as float32 array
+        """
+        # Try to load from plugin first
+        if bar_num is not None and self.instrument_plugin:
+            plugin_audio = self._load_audio_from_plugin(bar_num)
+            if plugin_audio is not None:
+                # Scale to requested duration
+                return self._tone_from_sample(bar_num, duration, data=plugin_audio)
+
+        # Fall back to samples mode if available
         if self.mode == "samples":
             if not self._samples_loaded:
                 self.load_samples()
             if bar_num and bar_num in self._samples:
                 return self._tone_from_sample(bar_num, duration)
+
+        # Final fallback to ADSR synthesis
         return self._adsr_tone(frequency, duration)
 
     def _adsr_tone(self, frequency, duration):
@@ -116,7 +262,7 @@ class RoneatPlayer:
         wave += 0.18 * np.sin(2 * np.pi * frequency * 2.756 * t)
         wave += 0.08 * np.sin(2 * np.pi * frequency * 4.0   * t)
         click_len = min(int(0.008 * self.sample_rate), n)
-        wave[:click_len] += np.random.uniform(-0.15, 0.15, click_len)
+        wave[:click_len] += np.random.uniform(-0.04, 0.04, click_len) * np.linspace(1.0, 0.0, click_len)
         decay_rate = 2.8 + (frequency - 177.0) / (1308.0 - 177.0) * 6.2
         decay_rate = max(2.0, min(decay_rate, 12.0))
         wave      *= np.exp(-decay_rate * t)
@@ -125,8 +271,24 @@ class RoneatPlayer:
             wave = wave / peak * 0.35
         return wave.astype(np.float32)
 
-    def _tone_from_sample(self, bar_num, duration):
-        data       = self._samples[bar_num].copy()
+    def _tone_from_sample(self, bar_num, duration, data=None):
+        """
+        Create a tone from a sample, optionally using provided data.
+
+        Args:
+            bar_num (int): Bar number (used for cache lookup if data not provided)
+            duration (float): Target duration in seconds
+            data (np.ndarray, optional): Pre-loaded audio data. If not provided,
+                                        looks up bar_num in self._samples cache.
+
+        Returns:
+            np.ndarray: Processed audio data as float32
+        """
+        if data is None:
+            data = self._samples[bar_num].copy()
+        else:
+            data = data.copy()
+
         target_len = max(1, int(duration * self.sample_rate))
         if len(data) > target_len:
             data = data[:target_len]
@@ -143,25 +305,25 @@ class RoneatPlayer:
     # Note builders
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _build_single_note(self, bar_idx, duration, two_mallets):
+    def _build_single_note(self, bar_idx, left_bar_idx, duration, two_mallets):
         n    = max(1, int(self.sample_rate * duration))
         tone = np.zeros(n, dtype=np.float32)
         if bar_idx not in self.roneat_dict:
             return tone
         tone += self.generate_tone(self.roneat_dict[bar_idx], duration, bar_idx)
         if two_mallets:
-            lh = bar_idx + 7
+            lh = left_bar_idx
             if lh <= 21 and lh in self.roneat_dict:
                 tone += self.generate_tone(self.roneat_dict[lh], duration, lh)
         return np.clip(tone, -1.0, 1.0).astype(np.float32)
 
-    def _build_tremolo(self, bar_idx, repeat, two_mallets, hits_per_sec=16.0):
+    def _build_tremolo(self, bar_idx, left_bar_idx, repeat, two_mallets, hits_per_sec=16.0):
         """
         Builds a tremolo with EXACTLY `repeat` strikes.
         The duration is calculated based on how fast the strikes are played (hits_per_sec).
         Returns the tone array AND the total actual duration.
         """
-        lh_idx = bar_idx + 7 if two_mallets else None
+        lh_idx = left_bar_idx if two_mallets else None
         has_lh = (lh_idx is not None and lh_idx <= 21
                   and lh_idx in self.roneat_dict
                   and bar_idx in self.roneat_dict)
@@ -200,24 +362,28 @@ class RoneatPlayer:
     # Playback
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _play_note(self, bar_idx, duration, two_mallets,
+    def _play_note(self, bar_idx, left_bar_idx, duration, two_mallets,
                    bar_callback=None, tremolo=False, repeat=1, hits_per_sec=16.0):
         if not self.is_playing:
             return 0.0
         if bar_callback:
             try:
-                bar_callback(bar_idx)
+                # Need to update the UI to highlight both? For now we just highlight right bar.
+                bar_callback(bar_idx, left_bar_idx)
             except Exception as e:
                 logging.warning(f"Error in bar_callback: {e}")
 
         if tremolo:
-            tone, actual_dur = self._build_tremolo(bar_idx, repeat, two_mallets, hits_per_sec)
+            tone, actual_dur = self._build_tremolo(bar_idx, left_bar_idx, repeat, two_mallets, hits_per_sec)
+            self.audio_core.play_buffer(tone)
         else:
-            tone = self._build_single_note(bar_idx, duration, two_mallets)
+            self.audio_core.trigger_note(bar_idx)
+            if two_mallets:
+                lh = left_bar_idx
+                if lh <= 21 and lh in self.roneat_dict:
+                    self.audio_core.trigger_note(lh)
             actual_dur = duration
 
-        sd.play(tone, self.sample_rate)
-        sd.wait()
         return actual_dur
 
     def play_score(self, score_text, bpm=120, two_mallets=False,
@@ -241,14 +407,14 @@ class RoneatPlayer:
                 if target > elapsed:
                     time.sleep(target - elapsed)
 
-                bar_idx, repeat, is_trem = _parse_token(str(item['note']))
+                bar_idx, left_bar_idx, repeat, is_trem = _parse_token(str(item['note']))
                 if bar_idx is None:
                     continue
 
                 dur = (min(sync_data[i+1]['time'] - item['time'], 0.9)
                        if i + 1 < len(sync_data) else 0.5)
 
-                self._play_note(bar_idx, max(0.05, dur), two_mallets,
+                self._play_note(bar_idx, left_bar_idx, max(0.05, dur), two_mallets,
                                 bar_callback, tremolo=is_trem, repeat=repeat, hits_per_sec=hits_per_sec)
         else:
             for token in score_text.replace('\n', ' ').split():
@@ -260,12 +426,15 @@ class RoneatPlayer:
                     time.sleep(beat)
                     continue
 
-                bar_idx, repeat, is_trem = _parse_token(token)
+                bar_idx, left_bar_idx, repeat, is_trem = _parse_token(token)
                 if bar_idx is None:
                     continue
 
-                self._play_note(bar_idx, beat, two_mallets,
+                actual_dur = self._play_note(bar_idx, left_bar_idx, beat, two_mallets,
                                 bar_callback, tremolo=is_trem, repeat=repeat, hits_per_sec=hits_per_sec)
+                
+                if self.is_playing:
+                    time.sleep(actual_dur)
 
         self.is_playing = False
         if bar_callback:
@@ -276,36 +445,68 @@ class RoneatPlayer:
 
     def stop(self):
         self.is_playing = False
-        sd.stop()
+        self.audio_core.stop_all()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Offline rendering (MP4 export)
     # ─────────────────────────────────────────────────────────────────────────
 
     def render_score_to_array(self, notes, durations, two_mallets=False, hits_per_sec=16.0):
-        sr     = self.sample_rate
-        chunks = []
+        sr = self.sample_rate
+        
+        # Calculate total length plus a 2.5s tail for final notes to ring out naturally
+        total_time = sum(durations) + 2.5
+        total_samples = max(1, int(total_time * sr))
+        output_arr = np.zeros(total_samples, dtype=np.float32)
+        
+        current_sample = 0
+        
         for note_raw, dur in zip(notes, durations):
+            dur_samples = int(dur * sr)
             if isinstance(note_raw, str):
-                bar_idx, repeat, is_trem = _parse_token(note_raw)
+                bar_idx, left_bar_idx, repeat, is_trem = _parse_token(note_raw)
             else:
                 is_trem = int(note_raw) < 0
                 bar_idx = abs(int(note_raw))
-                repeat  = 1
+                left_bar_idx = bar_idx + 7
+                repeat = 1
                 if not (1 <= bar_idx <= 21):
                     bar_idx = None
 
-            if bar_idx is None:
-                chunks.append(np.zeros(max(1, int(dur * sr)), dtype=np.float32))
-                continue
+            if bar_idx is not None and bar_idx in self.roneat_dict:
+                if is_trem:
+                    hit_dur = 1.0 / max(1.0, hits_per_sec)
+                    hit_samp = max(1, int(hit_dur * sr))
+                    for h in range(repeat):
+                        start_idx = current_sample + h * hit_samp
+                        if start_idx >= total_samples: break
+                        
+                        tone = self.generate_tone(self.roneat_dict[bar_idx], 2.5, bar_idx)
+                        end_idx = min(total_samples, start_idx + len(tone))
+                        output_arr[start_idx:end_idx] += tone[:end_idx - start_idx]
+                        
+                        if two_mallets:
+                            lh = left_bar_idx
+                            if lh <= 21 and lh in self.roneat_dict:
+                                lh_tone = self.generate_tone(self.roneat_dict[lh], 2.5, lh)
+                                end_idx_lh = min(total_samples, start_idx + len(lh_tone))
+                                output_arr[start_idx:end_idx_lh] += lh_tone[:end_idx_lh - start_idx]
+                else:
+                    tone = self.generate_tone(self.roneat_dict[bar_idx], 2.5, bar_idx)
+                    end_idx = min(total_samples, current_sample + len(tone))
+                    output_arr[current_sample:end_idx] += tone[:end_idx - current_sample]
+                    
+                    if two_mallets:
+                        lh = left_bar_idx
+                        if lh <= 21 and lh in self.roneat_dict:
+                            lh_tone = self.generate_tone(self.roneat_dict[lh], 2.5, lh)
+                            end_idx_lh = min(total_samples, current_sample + len(lh_tone))
+                            output_arr[current_sample:end_idx_lh] += lh_tone[:end_idx_lh - current_sample]
+            
+            current_sample += dur_samples
 
-            if is_trem:
-                tone, actual_dur = self._build_tremolo(bar_idx, repeat, two_mallets, hits_per_sec)
-                chunks.append(tone)
-            else:
-                tone = self._build_single_note(bar_idx, dur, two_mallets)
-                chunks.append(tone)
-
-        if chunks:
-            return np.concatenate(chunks)
-        return np.zeros(sr, dtype=np.float32)
+        # Normalize to avoid clipping distortion when many notes overlap
+        peak = np.max(np.abs(output_arr))
+        if peak > 0.01:
+            output_arr = output_arr / peak * 0.85  # 85% full scale, some headroom
+        return output_arr.astype(np.float32)

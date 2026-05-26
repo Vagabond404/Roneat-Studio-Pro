@@ -127,28 +127,6 @@ def load_plugin_module(plugin_id: str, plugin_dir: str):
         if spec and spec.loader:
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
-            
-            # --- Lightweight Sandboxing / Permissions Enforcement ---
-            permissions = manifest.get("permissions", [])
-            original_import = builtins.__import__
-            
-            def _restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
-                if name in ['os', 'shutil', 'subprocess', 'pathlib', 'io']:
-                    if "file_system" not in permissions and "system" not in permissions:
-                        raise ImportError(f"⚠️ SECURITY: Plugin '{plugin_id}' lacks 'file_system' permission to import '{name}'.")
-                
-                if name in ['socket', 'urllib', 'requests', 'http']:
-                    if "network" not in permissions:
-                        raise ImportError(f"⚠️ SECURITY: Plugin '{plugin_id}' lacks 'network' permission to import '{name}'.")
-                        
-                return original_import(name, globals, locals, fromlist, level)
-            
-            # Inject our restricted dictionary to avoid globally overriding
-            safe_builtins = builtins.__dict__.copy()
-            safe_builtins['__import__'] = _restricted_import
-            module.__builtins__ = safe_builtins
-            # --------------------------------------------------------
-            
             spec.loader.exec_module(module)
             return module, manifest
         else:

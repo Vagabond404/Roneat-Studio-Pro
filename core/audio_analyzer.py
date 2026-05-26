@@ -11,11 +11,9 @@ Changes in v7.1:
   - Polyphony detection + harmonic isolation preserved
 """
 
-import numpy as np
-import librosa
-import librosa.effects
-import librosa.onset
-from scipy.signal import butter, sosfilt
+# NOTE: numpy, librosa and scipy are imported lazily inside each function
+# to avoid the 1-3 second startup cost when the module is first imported.
+# They are only loaded the first time the user triggers audio analysis.
 
 from core.calibration import (
     load_fingerprints, match_window_to_bar,
@@ -30,6 +28,8 @@ PYIN_CONFIDENCE = 0.50
 
 
 def detect_polyphony(y, sr):
+    import numpy as np           # lazy — only loaded on first audio analysis
+    import librosa               # lazy
     frame_len = int(0.05 * sr)
     hop       = frame_len // 2
     n_fft     = 4096
@@ -55,6 +55,8 @@ def detect_polyphony(y, sr):
 
 
 def _detect_onsets(y_perc, sr):
+    import librosa               # lazy
+    import librosa.onset         # lazy
     frames = librosa.onset.onset_detect(
         y=y_perc, sr=sr, units='frames', hop_length=HOP_LENGTH,
         backtrack=True, pre_max=3, post_max=3, pre_avg=5, post_avg=5,
@@ -68,6 +70,8 @@ def _nearest_bar(hz, roneat_dict):
 
 
 def _pyin_pitch(y_win, sr):
+    import numpy as np           # lazy
+    import librosa               # lazy
     if len(y_win) < 1024:
         return None, 0.0, 0
     try:
@@ -114,6 +118,10 @@ def audio_to_notes(filepath, roneat_dict, two_mallets=True, progress_callback=No
         active_fps = None
         print("[Analyzer] Mode: pYIN PITCH DETECTION")
 
+    import numpy as np           # lazy — loaded only when analysis starts
+    import librosa               # lazy
+    import librosa.effects       # lazy
+    import librosa.onset         # lazy
     if progress_callback:
         progress_callback(3, "Loading audio file...", None, None)
     y, sr = librosa.load(filepath, sr=None, mono=True)
@@ -138,6 +146,7 @@ def audio_to_notes(filepath, roneat_dict, two_mallets=True, progress_callback=No
     margin     = 8.0 if is_poly else 4.0
     y_harm, y_perc = librosa.effects.hpss(y, margin=margin)
     if is_poly:
+        from scipy.signal import butter, sosfilt  # lazy
         nyq    = sr / 2.0
         sos    = butter(4, 200.0 / nyq, btype='high', output='sos')
         y_harm = sosfilt(sos, y_harm)
@@ -168,7 +177,7 @@ def audio_to_notes(filepath, roneat_dict, two_mallets=True, progress_callback=No
 
     for i, (frame, t) in enumerate(zip(onset_frames, onset_times)):
         pct      = 32 + int((i / len(onset_frames)) * 61)
-        onset_s  = librosa.frames_to_samples(frame, hop_length=HOP_LENGTH)
+        onset_s  = librosa.frames_to_samples(frame, hop_length=HOP_LENGTH)  # librosa already imported above
         w_start  = onset_s + skip_s
         w_end    = min(w_start + win_s,      len(y))
         py_end   = min(w_start + pyin_win_s, len(y_harm))
@@ -216,6 +225,8 @@ def sync_score_with_audio(score_text, audio_path):
     Align an existing score string with an audio file's onset times.
     Tremolo tokens (containing '#') produce negative note values.
     """
+    import librosa               # lazy
+    import librosa.effects       # lazy
     y, sr = librosa.load(audio_path, sr=None, mono=True)
     _, y_perc = librosa.effects.hpss(y, margin=4.0)
     _, onset_times = _detect_onsets(y_perc, sr)

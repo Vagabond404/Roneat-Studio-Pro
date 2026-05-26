@@ -1,0 +1,10 @@
+{
+  "id": "core",
+  "name": "Roneat Studio Core",
+  "version": "3.0.0",
+  "author": "Roneat Studio Team",
+  "description": "Core plugin providing essential functionality for Roneat Studio",
+  "type": "core",
+  "depends_on": [],
+  "entry_point": "main.py"
+}
