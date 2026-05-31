@@ -62,67 +62,47 @@ def main():
     set_progress(0.05, "Initializing…")
 
     # ── 2. Load heavy modules with progress feedback ───────────────────────────
-    set_progress(0.35, "Loading UI Engine…")
-    from core.file_manager import ensure_dirs
-    import core.eel_bridge as eel_bridge
-    import eel
+    set_progress(0.15, "Loading audio engine…")
+    import numpy          # noqa – pre-warm numpy
+    import sounddevice    # noqa
 
-    set_progress(0.70, "Preparing workspace…")
+    set_progress(0.35, "Loading analysis library…")
+    import librosa        # noqa – this is the slow one
+
+    set_progress(0.60, "Loading UI…")
+    from core.file_manager import ensure_dirs
+    from ui.main_window    import MainWindow
+
+    set_progress(0.80, "Preparing workspace…")
     ensure_dirs()
-    
-    # Initialize Eel bridge (scans plugins and loads active ones)
-    eel_bridge.init_bridge()
-    
-    # If a file was passed on startup, load it now
-    if initial_file:
-        try:
-            eel_bridge.load_project_file(initial_file)
-        except Exception as e:
-            logging.error(f"Failed to load initial file {initial_file}: {e}")
+
+    set_progress(0.95, "Launching…")
+
+    # ── 3. Build main window (hidden until splash closes) ─────────────────────
+    app = MainWindow(initial_file=initial_file)
 
     set_progress(1.0, "Ready")
     splash.update()
-    
-    # ── 3. Hand control to Eel ────────────────────────────────────────────────
+
+    # ── 4. Close splash & hand control to main window ─────────────────────────
     close_splash()
 
-    # Launch Eel Window
-    # Point Eel to the Vite dev server in dev mode, or serve built assets in production
-    exposed_js_funcs = [
-        'js_show_toast',
-        'js_transcribe_progress',
-        'js_active_beat_highlight',
-        'js_video_export_progress',
-        'js_load_project_data',
-        'js_calibration_progress'
-    ]
+    # Reassign default root so dynamically created fonts/vars don't crash
+    import tkinter
+    tkinter._default_root = app
 
-    if dev_mode:
-        logging.info("Starting Eel in DEVELOPMENT mode (proxying Vite)...")
-        eel.init('web', allowed_extensions=['.html'])
-        eel._js_functions.extend(exposed_js_funcs)
-        for func in exposed_js_funcs:
-            eel._mock_js_function(func)
-        eel.start(
-            'http://localhost:5173',
-            mode='chrome',
-            size=(1380, 860),
-            port=8000
-        )
-    else:
-        logging.info("Starting Eel in PRODUCTION mode (serving web/)...")
-        web_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web')
-        os.makedirs(web_dir, exist_ok=True)
-        eel.init(web_dir, allowed_extensions=['.html'])
-        eel._js_functions.extend(exposed_js_funcs)
-        for func in exposed_js_funcs:
-            eel._mock_js_function(func)
-        eel.start(
-            'index.html',
-            mode='chrome',
-            size=(1380, 860),
-            port=8000
-        )
+    # PyInstaller splash (if used with --splash flag)
+    try:
+        import pyi_splash
+        pyi_splash.close()
+    except ImportError:
+        pass
+
+    try:
+        app.mainloop()
+    except Exception as e:
+        logging.error("Unhandled exception in main loop", exc_info=True)
+        raise
 
 
 if __name__ == "__main__":
